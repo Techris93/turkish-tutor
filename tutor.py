@@ -90,8 +90,8 @@ async def ask_gemini(prompt: str, temperature: float = 0.4) -> str:
                 lambda: _client.generate_content(prompt)
             )
         return response.text.strip()
-    except Exception as e:
-        return f"[Error: {e}]"
+    except Exception:
+        return "[Error: Could not generate response. Please try again.]"
 
 
 # ─── Knowledge Base ───────────────────────────────────────────────────────────
@@ -100,7 +100,11 @@ def load_knowledge() -> List[Dict]:
     """Load the Turkish knowledge base."""
     if not os.path.exists(KNOWLEDGE_FILE):
         print(f"\n{YELLOW}⚠️  No knowledge base found. Building it now...{RESET}")
-        os.system(f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'dataset.py')}")
+        import subprocess
+        subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), 'dataset.py')],
+            check=False
+        )
     if os.path.exists(KNOWLEDGE_FILE):
         with open(KNOWLEDGE_FILE, encoding="utf-8") as f:
             data = json.load(f)

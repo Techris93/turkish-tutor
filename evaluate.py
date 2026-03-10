@@ -81,7 +81,11 @@ async def _generate(prompt: str, max_tokens: int = 400) -> str:
             )
         return response.text.strip()
     except Exception as e:
-        return f"[error: {e}]"
+        error_msg = str(e)
+        # Only expose rate-limit status, not full error details
+        if "429" in error_msg or "quota" in error_msg.lower():
+            return "[error: 429 rate limit exceeded]"
+        return "[error: generation failed]"
 
 
 # ─── Load knowledge ───────────────────────────────────────────────────────────

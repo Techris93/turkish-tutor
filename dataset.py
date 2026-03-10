@@ -497,7 +497,7 @@ def fetch_from_huggingface() -> List[Dict]:
     try:
         from datasets import load_dataset
         print("  📡 Fetching TQuAD from HuggingFace...")
-        dataset = load_dataset("erdometo/tquad", split="train", trust_remote_code=True)
+        dataset = load_dataset("erdometo/tquad", split="train")
         entries = []
         seen_topics = set()
         for item in dataset:

@@ -55,33 +55,52 @@ def _init_gemini():
             return False
 
 
+# Max retries for 429 rate-limit errors
+_MAX_RETRIES = 4
+_BASE_DELAY  = 5   # seconds — initial backoff
+
+
 async def _generate(prompt: str, max_tokens: int = 400) -> str:
+    """Call Gemini with retry + exponential backoff for 429 rate limits."""
     if not GEMINI_AVAILABLE:
         return ""
-    try:
-        loop = asyncio.get_event_loop()
+
+    last_error = None
+    for attempt in range(_MAX_RETRIES):
         try:
-            from google import genai as _genai
-            from google.genai import types
-            response = await loop.run_in_executor(
-                None,
-                lambda: _client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.2,
-                        max_output_tokens=max_tokens,
+            loop = asyncio.get_event_loop()
+            try:
+                from google import genai as _genai
+                from google.genai import types
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: _client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.2,
+                            max_output_tokens=max_tokens,
+                        )
                     )
                 )
-            )
-        except (ImportError, AttributeError):
-            response = await loop.run_in_executor(
-                None,
-                lambda: _client.generate_content(prompt)
-            )
-        return response.text.strip()
-    except Exception as e:
-        return f"[error: {e}]"
+            except (ImportError, AttributeError):
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: _client.generate_content(prompt)
+                )
+            return response.text.strip()
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            # Retry on rate limit (429) or transient server errors (5xx)
+            if "429" in error_str or "quota" in error_str or "resource" in error_str or "500" in error_str:
+                wait = _BASE_DELAY * (2 ** attempt)
+                print(f"\n  ⏳ Rate limited (attempt {attempt+1}/{_MAX_RETRIES}), waiting {wait}s...", end="", flush=True)
+                await asyncio.sleep(wait)
+            else:
+                return f"[error: {e}]"  # Non-retryable error
+
+    return f"[error after {_MAX_RETRIES} retries: {last_error}]"
 
 
 # ─── Load knowledge ───────────────────────────────────────────────────────────
@@ -186,12 +205,12 @@ async def evaluate_question(
 
     tutor_answer = await get_tutor_answer(question, knowledge, level)
 
-    # Score all dimensions
-    acc, ped, tr = await asyncio.gather(
-        score_accuracy(tutor_answer, gold, question),
-        score_pedagogy(tutor_answer, level),
-        score_turkish_correctness(tutor_answer),
-    )
+    # Score dimensions sequentially (not parallel) to avoid burst rate limits
+    acc = await score_accuracy(tutor_answer, gold, question)
+    await asyncio.sleep(1)  # brief pause between scoring calls
+    ped = await score_pedagogy(tutor_answer, level)
+    await asyncio.sleep(1)
+    tr  = await score_turkish_correctness(tutor_answer)
 
     # Composite score: weighted average
     composite = (acc * 0.50) + (ped * 0.30) + (tr * 0.20)
@@ -242,11 +261,17 @@ async def run_evaluation(
         print(f" (level: {level_filter})", end="")
     print("...\n")
 
+    # Delay between questions to avoid rate-limit (429)
+    DELAY_BETWEEN_QUESTIONS = 3  # seconds
+
     results = []
     for i, qa in enumerate(questions):
         print(f"  [{i+1:2d}/{len(questions)}] {qa['question'][:50]}...", end="\r", flush=True)
         result = await evaluate_question(qa, knowledge, verbose=verbose)
         results.append(result)
+        # Pace the calls — the free tier allows ~15 RPM
+        if i < len(questions) - 1:
+            await asyncio.sleep(DELAY_BETWEEN_QUESTIONS)
 
     print(" " * 70, end="\r")  # clear the last line
 

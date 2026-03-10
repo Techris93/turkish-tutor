@@ -154,7 +154,7 @@ def spawn_branches(count: int, dry_run: bool = False) -> List[Dict]:
                 "created_at": datetime.now().isoformat(),
             }, f, indent=2)
 
-        git(["add", ".direction"])
+        git(["add", "-f", ".direction"])
         git(["commit", "-m",
              f"chore: assign direction [{direction['name']}] to {branch_name}"])
 

@@ -9,3 +9,7 @@ data/eval_results/
 data/harvest_log.json
 .direction
 *.db
+
+# Ollama model files
+*.gguf
+Modelfile

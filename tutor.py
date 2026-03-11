@@ -1,12 +1,12 @@
 """
-Turkish Agent Tutor — Main Tutor Interface
-Gemini-powered interactive Turkish language tutor with CEFR-level adaptive teaching.
-Also supports Groq for ultra-fast inference.
+Türkçe Hoca — AI Turkish Language Tutor
+Offline Turkish tutor powered by Turkish-Gemma via Ollama.
+No API keys needed — runs fully on your machine.
 
 Usage:
-    python tutor.py                    # Start interactive session (Gemini)
+    python tutor.py                    # Start interactive session
     python tutor.py --level A2         # Start at specific CEFR level
-    python tutor.py --groq             # Use Groq (faster, higher rate limit)
+    python tutor.py --model gemma3:4b  # Use a different Ollama model
     python tutor.py --exercise         # Jump straight to exercises
 """
 
@@ -19,9 +19,6 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 from typing import Optional, List, Dict
-
-from dotenv import load_dotenv
-load_dotenv()
 
 # ─── Terminal Colors ──────────────────────────────────────────────────────────
 RESET  = "\033[0m"
@@ -41,113 +38,68 @@ KNOWLEDGE_FILE = os.path.join(DATA_DIR, "knowledge.json")
 SESSIONS_FILE  = os.path.join(DATA_DIR, "sessions.json")
 
 
-# ─── LLM Clients ─────────────────────────────────────────────────────────────
+# ─── Ollama Client ────────────────────────────────────────────────────────────
 
-GEMINI_AVAILABLE = False
-GROQ_AVAILABLE = False
-_client = None
-_groq_api_key = None
-_groq_model = "llama-3.3-70b-versatile"
-_backend = "gemini"  # "gemini" or "groq"
+OLLAMA_AVAILABLE = False
+_ollama_model = "turkish-gemma:latest"  # Turkish-Gemma-9b from Yıldız Technical University
 
 
-def _init_gemini():
-    global GEMINI_AVAILABLE, _client
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or api_key.startswith("your_"):
-        return False
+def _init_ollama(model: str = None):
+    """Check if Ollama is running and the requested model is available."""
+    global OLLAMA_AVAILABLE, _ollama_model
+    if model:
+        _ollama_model = model
     try:
-        from google import genai
-        _client = genai.Client(api_key=api_key)
-        GEMINI_AVAILABLE = True
-        return True
-    except ImportError:
-        try:
-            import google.generativeai as genai_legacy
-            genai_legacy.configure(api_key=api_key)
-            _client = genai_legacy.GenerativeModel("gemini-2.5-flash")
-            GEMINI_AVAILABLE = True
+        req = urllib.request.Request("http://localhost:11434/api/tags")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+        available = [m["name"] for m in data.get("models", [])]
+        base = _ollama_model.split(":")[0]
+        if _ollama_model in available or any(base in m for m in available):
+            for m in available:
+                if base in m:
+                    _ollama_model = m
+                    break
+            OLLAMA_AVAILABLE = True
             return True
-        except ImportError:
+        else:
+            print(f"  {YELLOW}⚠️  Model '{_ollama_model}' not found in Ollama.{RESET}")
+            if available:
+                print(f"  {GRAY}Available: {', '.join(available[:8])}{RESET}")
+            print(f"  {GRAY}Pull it with: ollama pull {_ollama_model}{RESET}")
             return False
-
-
-def _init_groq():
-    """Check for GROQ_API_KEY in env."""
-    global GROQ_AVAILABLE, _groq_api_key
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key or api_key.startswith("your_"):
+    except (urllib.error.URLError, OSError):
         return False
-    _groq_api_key = api_key
-    GROQ_AVAILABLE = True
-    return True
-
-
-async def ask_gemini(prompt: str, temperature: float = 0.4) -> str:
-    """Send prompt to Gemini, return response text."""
-    if not GEMINI_AVAILABLE:
-        return "[Gemini not available — check GEMINI_API_KEY in .env]"
-    try:
-        loop = asyncio.get_event_loop()
-        try:
-            from google import genai as _genai
-            from google.genai import types
-            response = await loop.run_in_executor(
-                None,
-                lambda: _client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=temperature,
-                        max_output_tokens=600,
-                    )
-                )
-            )
-        except (ImportError, AttributeError):
-            response = await loop.run_in_executor(
-                None,
-                lambda: _client.generate_content(prompt)
-            )
-        return response.text.strip()
-    except Exception:
-        return "[Error: Could not generate response. Please try again.]"
-
-
-async def ask_groq(prompt: str, temperature: float = 0.4) -> str:
-    """Send prompt to Groq (OpenAI-compatible API), return response text."""
-    if not GROQ_AVAILABLE:
-        return "[Groq not available — check GROQ_API_KEY in .env]"
-    try:
-        loop = asyncio.get_event_loop()
-        payload = json.dumps({
-            "model": _groq_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": 600,
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "https://api.groq.com/openai/v1/chat/completions",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {_groq_api_key}",
-            },
-        )
-        response = await loop.run_in_executor(
-            None,
-            lambda: urllib.request.urlopen(req, timeout=30)
-        )
-        data = json.loads(response.read())
-        return data["choices"][0]["message"]["content"].strip()
-    except Exception:
-        return "[Error: Could not reach Groq. Check your API key.]"
 
 
 async def ask_llm(prompt: str, temperature: float = 0.4) -> str:
-    """Unified LLM dispatcher — routes to Gemini or Groq."""
-    if _backend == "groq":
-        return await ask_groq(prompt, temperature)
-    return await ask_gemini(prompt, temperature)
+    """Send prompt to Ollama and return response text."""
+    if not OLLAMA_AVAILABLE:
+        return "[Ollama not available — run: ollama serve]"
+    try:
+        loop = asyncio.get_event_loop()
+        payload = json.dumps({
+            "model": _ollama_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": 600,
+            }
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        response = await loop.run_in_executor(
+            None,
+            lambda: urllib.request.urlopen(req, timeout=120)
+        )
+        data = json.loads(response.read())
+        return data.get("response", "").strip()
+    except Exception:
+        return "[Error: Could not reach Ollama. Is it running? → ollama serve]"
 
 
 # ─── Knowledge Base ───────────────────────────────────────────────────────────
@@ -451,27 +403,16 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 async def run_tutor(args):
-    global _backend
     from config import CEFR_LEVELS
 
     print_banner()
 
-    # Determine backend
-    if args.groq:
-        _backend = "groq"
-        if not _init_groq():
-            print(f"  {RED}⚠️  GROQ_API_KEY not set in .env{RESET}")
-            print(f"  {GRAY}Add your key to .env: GROQ_API_KEY=gsk_...{RESET}")
-            print(f"  {GRAY}Get a free key at: https://console.groq.com{RESET}\n")
-            sys.exit(1)
-    else:
-        _backend = "gemini"
-        if not _init_gemini():
-            print(f"  {RED}⚠️  GEMINI_API_KEY not set in .env{RESET}")
-            print(f"  {GRAY}Add your key to .env: GEMINI_API_KEY=your_key_here{RESET}")
-            print(f"  {GRAY}Get a free key at: https://aistudio.google.com{RESET}")
-            print(f"  {GRAY}Or use Groq:  python tutor.py --groq{RESET}\n")
-            sys.exit(1)
+    # Initialize Ollama
+    if not _init_ollama(model=args.model):
+        print(f"  {RED}⚠️  Ollama is not running or model not found.{RESET}")
+        print(f"  {GRAY}Start Ollama:  ollama serve{RESET}")
+        print(f"  {GRAY}Pull model:    ollama pull turkish-gemma{RESET}\n")
+        sys.exit(1)
 
     # Load knowledge base (auto-build if missing)
     knowledge = load_knowledge()
@@ -479,10 +420,7 @@ async def run_tutor(args):
         print(f"  {RED}❌ Knowledge base is empty. Run: python dataset.py{RESET}")
         sys.exit(1)
 
-    if _backend == "groq":
-        print(f"  {GREEN}✅ Groq ({_groq_model})  |  📚 {len(knowledge)} topics  |  ⚡ Ultra-fast{RESET}\n")
-    else:
-        print(f"  {GREEN}✅ Gemini connected  |  📚 {len(knowledge)} knowledge topics loaded{RESET}\n")
+    print(f"  {GREEN}✅ Ollama ({_ollama_model})  |  📚 {len(knowledge)} topics  |  🔒 Offline{RESET}\n")
 
     # Determine CEFR level
     cefr_level = args.level.upper() if args.level else None
@@ -509,13 +447,13 @@ async def run_tutor(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="🇹🇷 Türkçe Hoca — AI Turkish Language Tutor")
+    parser = argparse.ArgumentParser(description="🇹🇷 Türkçe Hoca — AI Turkish Language Tutor (Offline)")
     parser.add_argument("--level", type=str, choices=["A1", "A2", "B1", "B2", "C1", "C2"],
                         help="CEFR level to start at (default: ask on startup)")
     parser.add_argument("--topic", type=str, help="Specific topic to focus on")
     parser.add_argument("--exercise", action="store_true", help="Start immediately with an exercise")
-    parser.add_argument("--groq", action="store_true",
-                        help="Use Groq instead of Gemini (faster, higher rate limit)")
+    parser.add_argument("--model", type=str, default="turkish-gemma:latest",
+                        help="Ollama model to use (default: turkish-gemma:latest)")
     args = parser.parse_args()
 
     asyncio.run(run_tutor(args))

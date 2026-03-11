@@ -1,7 +1,8 @@
 """
-Turkish Agent Tutor — Evaluator
+Türkçe Hoca — Evaluator
 Scores the tutor config.py against the test Q&A dataset.
 Used by the autoresearch swarm to compare experiment branches.
+Runs fully offline via Ollama (Turkish-Gemma).
 
 Metrics:
   - answer_accuracy:    semantic similarity of AI answers vs gold standard
@@ -20,71 +21,69 @@ import sys
 import json
 import asyncio
 import argparse
+import urllib.request
+import urllib.error
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-
-from dotenv import load_dotenv
-load_dotenv()
 
 DATA_DIR    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 TEST_FILE   = os.path.join(DATA_DIR, "test_qa.json")
 RESULTS_DIR = os.path.join(DATA_DIR, "eval_results")
 
-GEMINI_AVAILABLE = False
-_client = None
+OLLAMA_AVAILABLE = False
+_ollama_model = "turkish-gemma:latest"
 
 
-def _init_gemini():
-    global GEMINI_AVAILABLE, _client
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or api_key.startswith("your_"):
-        return False
+def _init_ollama(model: str = None):
+    """Check if Ollama is running and the requested model is available."""
+    global OLLAMA_AVAILABLE, _ollama_model
+    if model:
+        _ollama_model = model
     try:
-        from google import genai
-        _client = genai.Client(api_key=api_key)
-        GEMINI_AVAILABLE = True
-        return True
-    except ImportError:
-        try:
-            import google.generativeai as genai_legacy
-            genai_legacy.configure(api_key=api_key)
-            _client = genai_legacy.GenerativeModel("gemini-2.5-flash")
-            GEMINI_AVAILABLE = True
+        req = urllib.request.Request("http://localhost:11434/api/tags")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+        available = [m["name"] for m in data.get("models", [])]
+        base = _ollama_model.split(":")[0]
+        if _ollama_model in available or any(base in m for m in available):
+            for m in available:
+                if base in m:
+                    _ollama_model = m
+                    break
+            OLLAMA_AVAILABLE = True
             return True
-        except ImportError:
-            return False
+        return False
+    except (urllib.error.URLError, OSError):
+        return False
 
 
 async def _generate(prompt: str, max_tokens: int = 400) -> str:
-    if not GEMINI_AVAILABLE:
+    """Generate text using Ollama."""
+    if not OLLAMA_AVAILABLE:
         return ""
     try:
         loop = asyncio.get_event_loop()
-        try:
-            from google import genai as _genai
-            from google.genai import types
-            response = await loop.run_in_executor(
-                None,
-                lambda: _client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.2,
-                        max_output_tokens=max_tokens,
-                    )
-                )
-            )
-        except (ImportError, AttributeError):
-            response = await loop.run_in_executor(
-                None,
-                lambda: _client.generate_content(prompt)
-            )
-        return response.text.strip()
-    except Exception as e:
-        error_msg = str(e)
-        # Only expose rate-limit status, not full error details
-        if "429" in error_msg or "quota" in error_msg.lower():
-            return "[error: 429 rate limit exceeded]"
+        payload = json.dumps({
+            "model": _ollama_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.2,
+                "num_predict": max_tokens,
+            }
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        response = await loop.run_in_executor(
+            None,
+            lambda: urllib.request.urlopen(req, timeout=120)
+        )
+        data = json.loads(response.read())
+        return data.get("response", "").strip()
+    except Exception:
         return "[error: generation failed]"
 
 
@@ -317,9 +316,12 @@ def print_results(summary: Dict):
 
 
 async def main_async(args):
-    if not _init_gemini():
-        print("❌ GEMINI_API_KEY not set in .env")
+    if not _init_ollama(model=args.model):
+        print("❌ Ollama is not running or model not found.")
+        print("  Start Ollama: ollama serve")
+        print("  Pull model:   ollama pull turkish-gemma")
         sys.exit(1)
+    print(f"  🔒 Using Ollama ({_ollama_model})")
 
     summary = await run_evaluation(
         level_filter=args.level,
@@ -340,12 +342,14 @@ async def main_async(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="🇹🇷 Turkish Tutor — Evaluator")
+    parser = argparse.ArgumentParser(description="🇹🇷 Türkçe Hoca — Evaluator (Offline)")
     parser.add_argument("--level", choices=["A1", "A2", "B1", "B2", "C1", "C2"],
                         help="Evaluate only questions for this CEFR level")
     parser.add_argument("--verbose", action="store_true", help="Show per-question scores")
     parser.add_argument("--max-questions", type=int, default=20,
                         help="Max questions to evaluate (default: 20)")
+    parser.add_argument("--model", type=str, default="turkish-gemma:latest",
+                        help="Ollama model to use (default: turkish-gemma:latest)")
     args = parser.parse_args()
     asyncio.run(main_async(args))
 

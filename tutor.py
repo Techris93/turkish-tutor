@@ -1,11 +1,13 @@
 """
 Turkish Agent Tutor — Main Tutor Interface
 Gemini-powered interactive Turkish language tutor with CEFR-level adaptive teaching.
+Also supports Ollama for fully offline local inference.
 
 Usage:
-    python tutor.py                    # Start interactive session
+    python tutor.py                    # Start interactive session (Gemini)
     python tutor.py --level A2         # Start at specific CEFR level
-    python tutor.py --topic grammar    # Start with a specific topic
+    python tutor.py --local            # Run offline with Ollama (default: qwen2.5:7b)
+    python tutor.py --local --model gemma3:4b  # Use a specific Ollama model
     python tutor.py --exercise         # Jump straight to exercises
 """
 
@@ -14,6 +16,8 @@ import sys
 import json
 import argparse
 import asyncio
+import urllib.request
+import urllib.error
 from datetime import datetime
 from typing import Optional, List, Dict
 
@@ -41,7 +45,11 @@ SESSIONS_FILE  = os.path.join(DATA_DIR, "sessions.json")
 # ─── Gemini Client ────────────────────────────────────────────────────────────
 
 GEMINI_AVAILABLE = False
+OLLAMA_AVAILABLE = False
 _client = None
+_ollama_model = "qwen2.5:7b"  # default local model
+_backend = "gemini"  # "gemini" or "ollama"
+
 
 def _init_gemini():
     global GEMINI_AVAILABLE, _client
@@ -62,6 +70,28 @@ def _init_gemini():
             return True
         except ImportError:
             return False
+
+
+def _init_ollama(model: str = None):
+    """Check if Ollama is running and the model is available."""
+    global OLLAMA_AVAILABLE, _ollama_model
+    if model:
+        _ollama_model = model
+    try:
+        req = urllib.request.Request("http://localhost:11434/api/tags")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+        available = [m["name"] for m in data.get("models", [])]
+        if _ollama_model in available or any(_ollama_model.split(":")[0] in m for m in available):
+            OLLAMA_AVAILABLE = True
+            return True
+        else:
+            print(f"  {YELLOW}⚠️  Model '{_ollama_model}' not found in Ollama.{RESET}")
+            print(f"  {GRAY}Available: {', '.join(available[:8])}{RESET}")
+            print(f"  {GRAY}Pull it with: ollama pull {_ollama_model}{RESET}")
+            return False
+    except (urllib.error.URLError, OSError):
+        return False
 
 
 async def ask_gemini(prompt: str, temperature: float = 0.4) -> str:
@@ -92,6 +122,41 @@ async def ask_gemini(prompt: str, temperature: float = 0.4) -> str:
         return response.text.strip()
     except Exception:
         return "[Error: Could not generate response. Please try again.]"
+
+
+async def ask_ollama(prompt: str, temperature: float = 0.4) -> str:
+    """Send prompt to local Ollama, return response text."""
+    try:
+        loop = asyncio.get_event_loop()
+        payload = json.dumps({
+            "model": _ollama_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": 600,
+            }
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        response = await loop.run_in_executor(
+            None,
+            lambda: urllib.request.urlopen(req, timeout=120)
+        )
+        data = json.loads(response.read())
+        return data.get("response", "").strip()
+    except Exception:
+        return "[Error: Could not reach Ollama. Is it running? → ollama serve]"
+
+
+async def ask_llm(prompt: str, temperature: float = 0.4) -> str:
+    """Unified LLM dispatcher — routes to Gemini or Ollama based on --local flag."""
+    if _backend == "ollama":
+        return await ask_ollama(prompt, temperature)
+    return await ask_gemini(prompt, temperature)
 
 
 # ─── Knowledge Base ───────────────────────────────────────────────────────────
@@ -256,7 +321,7 @@ async def run_exercise(session: TutorSession, knowledge: List[Dict]) -> None:
     )
 
     print(f"\n{BOLD}{BLUE}📝 Practice Exercise:{RESET}")
-    response = await ask_gemini(exercise_prompt)
+    response = await ask_llm(exercise_prompt)
     print_tutor(response)
     session.add_exchange("assistant", response)
 
@@ -276,7 +341,7 @@ async def run_exercise(session: TutorSession, knowledge: List[Dict]) -> None:
         cefr_level=session.cefr_level,
         conversation_history=session.history,
     )
-    feedback = await ask_gemini(eval_prompt)
+    feedback = await ask_llm(eval_prompt)
     print_tutor(feedback)
     session.add_exchange("assistant", feedback)
 
@@ -336,7 +401,7 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
     )
 
     print(f"{GRAY}(Connecting to Türkçe Hoca...){RESET}", end="\r", flush=True)
-    opening = await ask_gemini(opening_prompt)
+    opening = await ask_llm(opening_prompt)
     clear_line()
     print_tutor(opening)
     session.add_exchange("assistant", opening)
@@ -386,7 +451,7 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
         )
 
         print(f"{GRAY}(thinking...){RESET}", end="\r", flush=True)
-        response = await ask_gemini(prompt)
+        response = await ask_llm(prompt)
         clear_line()
         print_tutor(response)
         session.add_exchange("assistant", response)
@@ -395,16 +460,27 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 async def run_tutor(args):
+    global _backend
     from config import CEFR_LEVELS
 
     print_banner()
 
-    # Check Gemini
-    if not _init_gemini():
-        print(f"  {RED}⚠️  GEMINI_API_KEY not set in .env{RESET}")
-        print(f"  {GRAY}Add your key to .env: GEMINI_API_KEY=your_key_here{RESET}")
-        print(f"  {GRAY}Get a free key at: https://aistudio.google.com{RESET}\n")
-        sys.exit(1)
+    # Determine backend
+    if args.local:
+        _backend = "ollama"
+        if not _init_ollama(model=args.model):
+            print(f"  {RED}⚠️  Ollama is not running or model not found.{RESET}")
+            print(f"  {GRAY}Start Ollama:  ollama serve{RESET}")
+            print(f"  {GRAY}Pull a model:  ollama pull {args.model or 'qwen2.5:7b'}{RESET}\n")
+            sys.exit(1)
+    else:
+        _backend = "gemini"
+        if not _init_gemini():
+            print(f"  {RED}⚠️  GEMINI_API_KEY not set in .env{RESET}")
+            print(f"  {GRAY}Add your key to .env: GEMINI_API_KEY=your_key_here{RESET}")
+            print(f"  {GRAY}Get a free key at: https://aistudio.google.com{RESET}")
+            print(f"  {GRAY}Or run offline:  python tutor.py --local{RESET}\n")
+            sys.exit(1)
 
     # Load knowledge base (auto-build if missing)
     knowledge = load_knowledge()
@@ -412,7 +488,10 @@ async def run_tutor(args):
         print(f"  {RED}❌ Knowledge base is empty. Run: python dataset.py{RESET}")
         sys.exit(1)
 
-    print(f"  {GREEN}✅ Gemini connected  |  📚 {len(knowledge)} knowledge topics loaded{RESET}\n")
+    if _backend == "ollama":
+        print(f"  {GREEN}✅ Ollama ({_ollama_model})  |  📚 {len(knowledge)} knowledge topics loaded  |  🔒 Offline{RESET}\n")
+    else:
+        print(f"  {GREEN}✅ Gemini connected  |  📚 {len(knowledge)} knowledge topics loaded{RESET}\n")
 
     # Determine CEFR level
     cefr_level = args.level.upper() if args.level else None
@@ -444,6 +523,10 @@ def main():
                         help="CEFR level to start at (default: ask on startup)")
     parser.add_argument("--topic", type=str, help="Specific topic to focus on")
     parser.add_argument("--exercise", action="store_true", help="Start immediately with an exercise")
+    parser.add_argument("--local", action="store_true",
+                        help="Run offline using Ollama (no API key needed)")
+    parser.add_argument("--model", type=str, default="qwen2.5:7b",
+                        help="Ollama model to use with --local (default: qwen2.5:7b)")
     args = parser.parse_args()
 
     asyncio.run(run_tutor(args))

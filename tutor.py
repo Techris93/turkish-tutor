@@ -1,11 +1,12 @@
 """
 Turkish Agent Tutor — Main Tutor Interface
 Gemini-powered interactive Turkish language tutor with CEFR-level adaptive teaching.
+Also supports Groq for ultra-fast inference.
 
 Usage:
-    python tutor.py                    # Start interactive session
+    python tutor.py                    # Start interactive session (Gemini)
     python tutor.py --level A2         # Start at specific CEFR level
-    python tutor.py --topic grammar    # Start with a specific topic
+    python tutor.py --groq             # Use Groq (faster, higher rate limit)
     python tutor.py --exercise         # Jump straight to exercises
 """
 
@@ -14,6 +15,8 @@ import sys
 import json
 import argparse
 import asyncio
+import urllib.request
+import urllib.error
 from datetime import datetime
 from typing import Optional, List, Dict
 
@@ -38,10 +41,14 @@ KNOWLEDGE_FILE = os.path.join(DATA_DIR, "knowledge.json")
 SESSIONS_FILE  = os.path.join(DATA_DIR, "sessions.json")
 
 
-# ─── Gemini Client ────────────────────────────────────────────────────────────
+# ─── LLM Clients ─────────────────────────────────────────────────────────────
 
 GEMINI_AVAILABLE = False
+GROQ_AVAILABLE = False
 _client = None
+_groq_api_key = None
+_groq_model = "llama-3.3-70b-versatile"
+_backend = "gemini"  # "gemini" or "groq"
 
 
 def _init_gemini():
@@ -63,6 +70,17 @@ def _init_gemini():
             return True
         except ImportError:
             return False
+
+
+def _init_groq():
+    """Check for GROQ_API_KEY in env."""
+    global GROQ_AVAILABLE, _groq_api_key
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key or api_key.startswith("your_"):
+        return False
+    _groq_api_key = api_key
+    GROQ_AVAILABLE = True
+    return True
 
 
 async def ask_gemini(prompt: str, temperature: float = 0.4) -> str:
@@ -93,6 +111,43 @@ async def ask_gemini(prompt: str, temperature: float = 0.4) -> str:
         return response.text.strip()
     except Exception:
         return "[Error: Could not generate response. Please try again.]"
+
+
+async def ask_groq(prompt: str, temperature: float = 0.4) -> str:
+    """Send prompt to Groq (OpenAI-compatible API), return response text."""
+    if not GROQ_AVAILABLE:
+        return "[Groq not available — check GROQ_API_KEY in .env]"
+    try:
+        loop = asyncio.get_event_loop()
+        payload = json.dumps({
+            "model": _groq_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": 600,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.groq.com/openai/v1/chat/completions",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {_groq_api_key}",
+            },
+        )
+        response = await loop.run_in_executor(
+            None,
+            lambda: urllib.request.urlopen(req, timeout=30)
+        )
+        data = json.loads(response.read())
+        return data["choices"][0]["message"]["content"].strip()
+    except Exception:
+        return "[Error: Could not reach Groq. Check your API key.]"
+
+
+async def ask_llm(prompt: str, temperature: float = 0.4) -> str:
+    """Unified LLM dispatcher — routes to Gemini or Groq."""
+    if _backend == "groq":
+        return await ask_groq(prompt, temperature)
+    return await ask_gemini(prompt, temperature)
 
 
 # ─── Knowledge Base ───────────────────────────────────────────────────────────
@@ -257,7 +312,7 @@ async def run_exercise(session: TutorSession, knowledge: List[Dict]) -> None:
     )
 
     print(f"\n{BOLD}{BLUE}📝 Practice Exercise:{RESET}")
-    response = await ask_gemini(exercise_prompt)
+    response = await ask_llm(exercise_prompt)
     print_tutor(response)
     session.add_exchange("assistant", response)
 
@@ -277,7 +332,7 @@ async def run_exercise(session: TutorSession, knowledge: List[Dict]) -> None:
         cefr_level=session.cefr_level,
         conversation_history=session.history,
     )
-    feedback = await ask_gemini(eval_prompt)
+    feedback = await ask_llm(eval_prompt)
     print_tutor(feedback)
     session.add_exchange("assistant", feedback)
 
@@ -337,7 +392,7 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
     )
 
     print(f"{GRAY}(Connecting to Türkçe Hoca...){RESET}", end="\r", flush=True)
-    opening = await ask_gemini(opening_prompt)
+    opening = await ask_llm(opening_prompt)
     clear_line()
     print_tutor(opening)
     session.add_exchange("assistant", opening)
@@ -387,7 +442,7 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
         )
 
         print(f"{GRAY}(thinking...){RESET}", end="\r", flush=True)
-        response = await ask_gemini(prompt)
+        response = await ask_llm(prompt)
         clear_line()
         print_tutor(response)
         session.add_exchange("assistant", response)
@@ -396,16 +451,27 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 async def run_tutor(args):
+    global _backend
     from config import CEFR_LEVELS
 
     print_banner()
 
-    # Check Gemini
-    if not _init_gemini():
-        print(f"  {RED}⚠️  GEMINI_API_KEY not set in .env{RESET}")
-        print(f"  {GRAY}Add your key to .env: GEMINI_API_KEY=your_key_here{RESET}")
-        print(f"  {GRAY}Get a free key at: https://aistudio.google.com{RESET}\n")
-        sys.exit(1)
+    # Determine backend
+    if args.groq:
+        _backend = "groq"
+        if not _init_groq():
+            print(f"  {RED}⚠️  GROQ_API_KEY not set in .env{RESET}")
+            print(f"  {GRAY}Add your key to .env: GROQ_API_KEY=gsk_...{RESET}")
+            print(f"  {GRAY}Get a free key at: https://console.groq.com{RESET}\n")
+            sys.exit(1)
+    else:
+        _backend = "gemini"
+        if not _init_gemini():
+            print(f"  {RED}⚠️  GEMINI_API_KEY not set in .env{RESET}")
+            print(f"  {GRAY}Add your key to .env: GEMINI_API_KEY=your_key_here{RESET}")
+            print(f"  {GRAY}Get a free key at: https://aistudio.google.com{RESET}")
+            print(f"  {GRAY}Or use Groq:  python tutor.py --groq{RESET}\n")
+            sys.exit(1)
 
     # Load knowledge base (auto-build if missing)
     knowledge = load_knowledge()
@@ -413,7 +479,10 @@ async def run_tutor(args):
         print(f"  {RED}❌ Knowledge base is empty. Run: python dataset.py{RESET}")
         sys.exit(1)
 
-    print(f"  {GREEN}✅ Gemini connected  |  📚 {len(knowledge)} knowledge topics loaded{RESET}\n")
+    if _backend == "groq":
+        print(f"  {GREEN}✅ Groq ({_groq_model})  |  📚 {len(knowledge)} topics  |  ⚡ Ultra-fast{RESET}\n")
+    else:
+        print(f"  {GREEN}✅ Gemini connected  |  📚 {len(knowledge)} knowledge topics loaded{RESET}\n")
 
     # Determine CEFR level
     cefr_level = args.level.upper() if args.level else None
@@ -445,6 +514,8 @@ def main():
                         help="CEFR level to start at (default: ask on startup)")
     parser.add_argument("--topic", type=str, help="Specific topic to focus on")
     parser.add_argument("--exercise", action="store_true", help="Start immediately with an exercise")
+    parser.add_argument("--groq", action="store_true",
+                        help="Use Groq instead of Gemini (faster, higher rate limit)")
     args = parser.parse_args()
 
     asyncio.run(run_tutor(args))

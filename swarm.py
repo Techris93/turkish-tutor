@@ -13,7 +13,6 @@ Usage:
 """
 
 import os
-import sys
 import json
 import re
 import subprocess
@@ -91,6 +90,27 @@ def get_current_branch() -> str:
     return git(["rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
 
 
+def get_default_branch() -> str:
+    """Resolve the repository default branch with sensible fallbacks."""
+    origin_head = git(["symbolic-ref", "refs/remotes/origin/HEAD"], check=False)
+    if origin_head.returncode == 0:
+        ref = origin_head.stdout.strip()
+        if ref.startswith("refs/remotes/origin/"):
+            return ref.replace("refs/remotes/origin/", "", 1)
+
+    for candidate in ("main", "master"):
+        if branch_exists(candidate):
+            return candidate
+
+    return get_current_branch()
+
+
+def has_uncommitted_changes() -> bool:
+    """Return True when the working tree has tracked or untracked changes."""
+    status = git(["status", "--porcelain"], check=False)
+    return bool(status.stdout.strip())
+
+
 def list_experiment_branches() -> List[str]:
     result = git(["branch", "--list", "experiment/*"])
     return [b.strip().lstrip("* ") for b in result.stdout.strip().split("\n") if b.strip()]
@@ -122,6 +142,7 @@ def get_branch_score(branch: str) -> Optional[float]:
 def spawn_branches(count: int, dry_run: bool = False) -> List[Dict]:
     """Create N experiment branches, each with a different research direction."""
     original_branch = get_current_branch()
+    base_branch = get_default_branch()
     existing = list_experiment_branches()
 
     available = RESEARCH_DIRECTIONS
@@ -141,11 +162,11 @@ def spawn_branches(count: int, dry_run: bool = False) -> List[Dict]:
             spawned.append({"branch": branch_name, "direction": direction["name"]})
             continue
 
-        git(["checkout", "main"], check=False)
+        git(["checkout", base_branch], check=False)
         git(["checkout", "-b", branch_name])
 
         direction_file = os.path.join(REPO_DIR, ".direction")
-        with open(direction_file, "w") as f:
+        with open(direction_file, "w", encoding="utf-8") as f:
             json.dump({
                 "agent_id": f"agent-{agent_num + i}",
                 "branch": branch_name,
@@ -170,6 +191,7 @@ def spawn_branches(count: int, dry_run: bool = False) -> List[Dict]:
 def show_status():
     branches = list_experiment_branches()
     current = get_current_branch()
+    base_branch = get_default_branch()
 
     print(f"\n{'═' * 68}")
     print(f"  🐝 Turkish Tutor Swarm — {len(branches)} experiment branches")
@@ -193,7 +215,7 @@ def show_status():
         score = get_branch_score(branch)
         score_str = f"score={score:.4f}" if score else "no results"
 
-        result = git(["rev-list", "--count", f"main..{branch}"], check=False)
+        result = git(["rev-list", "--count", f"{base_branch}..{branch}"], check=False)
         commits = result.stdout.strip() if result.returncode == 0 else "?"
 
         active = " ← YOU" if branch == current else ""
@@ -206,7 +228,7 @@ def show_leaderboard():
     branches = list_experiment_branches()
 
     print(f"\n{'═' * 68}")
-    print(f"  🏆 Turkish Tutor Leaderboard")
+    print("  🏆 Turkish Tutor Leaderboard")
     print(f"{'═' * 68}\n")
 
     entries = []
@@ -238,7 +260,7 @@ def show_leaderboard():
                             "score": score,
                             "direction": "local",
                         })
-                except Exception:
+                except (OSError, json.JSONDecodeError, ValueError):
                     pass
 
     entries.sort(key=lambda x: -x["score"])
@@ -262,13 +284,18 @@ def show_leaderboard():
 
 
 def adopt_branch(branch: str, confirm: bool = False):
-    """Copy config.py from the specified branch to main.
+    """Copy config.py from the specified branch to default branch.
 
     Security: Only experiment/* branches with safe names are accepted.
     --confirm flag required to prevent accidental overwrites.
     """
     if not re.match(r'^experiment/[a-zA-Z0-9_\-]+$', branch):
         print(f"  ❌ Invalid branch name '{branch}'. Only 'experiment/<safe-name>' accepted.")
+        return
+
+    if has_uncommitted_changes():
+        print("  ❌ Working tree has uncommitted changes.")
+        print("     Commit or stash them before adopting a branch to avoid accidental overwrite.")
         return
 
     if not branch_exists(branch):
@@ -283,14 +310,16 @@ def adopt_branch(branch: str, confirm: bool = False):
     score = get_branch_score(branch)
     score_str = f"score={score:.4f}" if score else "unknown score"
 
+    base_branch = get_default_branch()
+
     if not confirm:
-        print(f"  ⚠️  This will overwrite config.py on main with code from {branch} ({score_str}).")
+        print(f"  ⚠️  This will overwrite config.py on {base_branch} with code from {branch} ({score_str}).")
         print(f"     Review first: git show {branch}:config.py")
         print(f"     To proceed: python swarm.py --adopt {branch} --confirm")
         return
 
     original = get_current_branch()
-    git(["checkout", "main"])
+    git(["checkout", base_branch])
 
     config_path = os.path.join(REPO_DIR, "config.py")
     with open(config_path, "w", encoding="utf-8") as f:
@@ -300,9 +329,9 @@ def adopt_branch(branch: str, confirm: bool = False):
     git(["commit", "-m",
          f"adopt: {branch} ({score_str})\n\nCherry-picked config.py from {branch}"])
 
-    print(f"  ✅ Adopted config.py from {branch} ({score_str}) into main")
+    print(f"  ✅ Adopted config.py from {branch} ({score_str}) into {base_branch}")
 
-    if original != "main":
+    if original != base_branch:
         git(["checkout", original], check=False)
 
 
@@ -324,7 +353,7 @@ def main():
         print(f"\n🐝 Spawning {args.spawn} experiment branches...\n")
         spawned = spawn_branches(args.spawn, dry_run=args.dry_run)
         print(f"\n  Spawned {len(spawned)} branches. Checkout a branch and modify config.py,")
-        print(f"  then run: python evaluate.py  to score it.\n")
+        print("  then run: python evaluate.py  to score it.\n")
     elif args.status:
         show_status()
     elif args.leaderboard:
@@ -333,7 +362,7 @@ def main():
         adopt_branch(args.adopt, confirm=args.confirm)
     elif args.directions:
         print(f"\n{'═' * 58}")
-        print(f"  📋 Available Research Directions")
+        print("  📋 Available Research Directions")
         print(f"{'═' * 58}\n")
         for d in RESEARCH_DIRECTIONS:
             print(f"  → {d['name']}")

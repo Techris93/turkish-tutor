@@ -15,10 +15,9 @@ Usage:
 
 import json
 import os
-import sys
 import argparse
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 KNOWLEDGE_FILE = os.path.join(DATA_DIR, "knowledge.json")
@@ -326,7 +325,7 @@ WH-QUESTIONS use question words (no mi needed):
 WORD ORDER: In Turkish, the question word takes the same position as its answer:
   Saat kaç? (What time is it? — lit. 'Clock how-many?')
   Kim geldi? (Who came?)
-  Neret gittin? (Where did you go?)""",
+  Nereye gittin? (Where did you go?)""",
     },
     {
         "topic": "Possessive Suffixes",
@@ -519,7 +518,7 @@ def fetch_from_huggingface() -> List[Dict]:
     except ImportError:
         print("  ⚠️  'datasets' library not installed. Run: pip install datasets")
         return []
-    except Exception as e:
+    except (OSError, RuntimeError, ValueError, TypeError) as e:
         print(f"  ⚠️  HuggingFace fetch failed: {e}")
         return []
 
@@ -602,7 +601,7 @@ def save_test_qa():
 def show_status():
     """Show knowledge base statistics."""
     print(f"\n{'═' * 55}")
-    print(f"  🇹🇷 Turkish Tutor — Dataset Status")
+    print("  🇹🇷 Turkish Tutor — Dataset Status")
     print(f"{'═' * 55}")
     if os.path.exists(KNOWLEDGE_FILE):
         with open(KNOWLEDGE_FILE, encoding="utf-8") as f:
@@ -641,7 +640,7 @@ def main():
     entries = build_knowledge_base(fetch_hf=args.fetch_hf)
     save_knowledge(entries)
     save_test_qa()
-    print(f"\n✅ Dataset ready! Run: python tutor.py\n")
+    print("\n✅ Dataset ready! Run: python tutor.py\n")
 
 
 if __name__ == "__main__":

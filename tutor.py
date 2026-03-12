@@ -1,12 +1,10 @@
 """
 Türkçe Hoca — AI Turkish Language Tutor
-Offline Turkish tutor powered by Turkish-Gemma via Ollama.
-No API keys needed — runs fully on your machine.
+Powered by Google Gemini.
 
 Usage:
     python tutor.py                    # Start interactive session
     python tutor.py --level A2         # Start at specific CEFR level
-    python tutor.py --model gemma3:4b  # Use a different Ollama model
     python tutor.py --exercise         # Jump straight to exercises
 """
 
@@ -15,10 +13,9 @@ import sys
 import json
 import argparse
 import asyncio
-import urllib.request
-import urllib.error
+from config import MODEL
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import List, Dict
 
 # ─── Terminal Colors ──────────────────────────────────────────────────────────
 RESET  = "\033[0m"
@@ -31,75 +28,80 @@ CYAN   = "\033[96m"
 GRAY   = "\033[90m"
 WHITE  = "\033[97m"
 BG_BLUE   = "\033[44m"
-BG_GREEN  = "\033[42m"
 
 DATA_DIR       = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 KNOWLEDGE_FILE = os.path.join(DATA_DIR, "knowledge.json")
 SESSIONS_FILE  = os.path.join(DATA_DIR, "sessions.json")
 
 
-# ─── Ollama Client ────────────────────────────────────────────────────────────
+# ─── Gemini Client ──────────────────────────────────────────────────────────────
 
-OLLAMA_AVAILABLE = False
-_ollama_model = "turkish-gemma:latest"  # Turkish-Gemma-9b from Yıldız Technical University
+GEMINI_STATE = {
+    "available": False,
+    "client": None,
+}
 
 
-def _init_ollama(model: str = None):
-    """Check if Ollama is running and the requested model is available."""
-    global OLLAMA_AVAILABLE, _ollama_model
-    if model:
-        _ollama_model = model
-    try:
-        req = urllib.request.Request("http://localhost:11434/api/tags")
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read())
-        available = [m["name"] for m in data.get("models", [])]
-        base = _ollama_model.split(":")[0]
-        if _ollama_model in available or any(base in m for m in available):
-            for m in available:
-                if base in m:
-                    _ollama_model = m
-                    break
-            OLLAMA_AVAILABLE = True
-            return True
-        else:
-            print(f"  {YELLOW}⚠️  Model '{_ollama_model}' not found in Ollama.{RESET}")
-            if available:
-                print(f"  {GRAY}Available: {', '.join(available[:8])}{RESET}")
-            print(f"  {GRAY}Pull it with: ollama pull {_ollama_model}{RESET}")
-            return False
-    except (urllib.error.URLError, OSError):
+def _read_env_api_key() -> str:
+    """Read API key from environment or .env file."""
+    env_key = os.environ.get("GEMINI_API_KEY")
+    if env_key:
+        return env_key.strip()
+
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.exists(env_path):
+        return ""
+
+    with open(env_path, encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or not line.startswith("GEMINI_API_KEY="):
+                continue
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+
+    return ""
+
+def _init_gemini():
+    """Initialize the Google Gemini API client."""
+    api_key = _read_env_api_key()
+
+    if not api_key:
         return False
 
+    try:
+        # Modern SDK (required): google.genai
+        from google import genai as modern_genai  # type: ignore
+
+        GEMINI_STATE["client"] = modern_genai.Client(api_key=api_key)
+        GEMINI_STATE["available"] = True
+        return True
+    except (ImportError, RuntimeError, ValueError, OSError):
+        GEMINI_STATE["available"] = False
+        GEMINI_STATE["client"] = None
+    return False
+
+
+def _generate_text(prompt: str) -> str:
+    """Generate model text with the google.genai client."""
+    client = GEMINI_STATE.get("client")
+    response = client.models.generate_content(model=MODEL, contents=prompt)
+    text = getattr(response, "text", "")
+    return text.strip() if text else ""
 
 async def ask_llm(prompt: str, temperature: float = 0.4) -> str:
-    """Send prompt to Ollama and return response text."""
-    if not OLLAMA_AVAILABLE:
-        return "[Ollama not available — run: ollama serve]"
+    """Send prompt to Gemini and return response text."""
+    _ = temperature  # Kept for backward compatibility with existing callers.
+    if not GEMINI_STATE["available"]:
+        return "[Error: Gemini API not configured]"
     try:
-        loop = asyncio.get_event_loop()
-        payload = json.dumps({
-            "model": _ollama_model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": 600,
-            }
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
-            lambda: urllib.request.urlopen(req, timeout=120)
+            lambda: _generate_text(prompt)
         )
-        data = json.loads(response.read())
-        return data.get("response", "").strip()
-    except Exception:
-        return "[Error: Could not reach Ollama. Is it running? → ollama serve]"
+        return response if response else "[Error: Empty response from model]"
+    except (RuntimeError, ValueError, OSError, AttributeError):
+        return "[Error: Could not generate response. Please try again.]"
 
 
 # ─── Knowledge Base ───────────────────────────────────────────────────────────
@@ -128,6 +130,7 @@ class TutorSession:
     def __init__(self, username: str = "learner", cefr_level: str = "A1"):
         self.username = username
         self.cefr_level = cefr_level
+        self.topic_focus = ""
         self.history: List[Dict] = []
         self.exchange_count = 0
         self.correct_answers = 0
@@ -214,7 +217,6 @@ def cmd_help():
   {CYAN}/exercise{RESET}   — Get a practice exercise
   {CYAN}/vocab{RESET}      — Vocabulary flashcard drill
   {CYAN}/progress{RESET}   — Show your session progress
-  {CYAN}/examples{RESET}   — Show grammar examples for current topic
   {CYAN}/quit / /exit{RESET} — End the session
   {CYAN}/help{RESET}       — Show this help menu
 """)
@@ -247,6 +249,44 @@ def cmd_level_change(session: TutorSession, levels: dict) -> str:
         return session.cefr_level
 
 
+def cmd_topic_change(session: TutorSession, knowledge: List[Dict]) -> None:
+    topics = [e.get("topic", "").strip() for e in knowledge if e.get("topic")]
+    unique_topics = []
+    seen = set()
+    for topic in topics:
+        key = topic.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_topics.append(topic)
+
+    print(f"\n{BOLD}Topic focus:{RESET} Type a topic name, or leave blank to clear focus.")
+    if unique_topics:
+        print(f"{GRAY}Suggestions:{RESET}")
+        for topic in unique_topics[:8]:
+            print(f"  {CYAN}- {topic}{RESET}")
+
+    print_prompt()
+    chosen = input().strip()
+
+    if not chosen:
+        session.topic_focus = ""
+        print(f"  {GREEN}✅ Topic focus cleared.{RESET}")
+        return
+
+    session.topic_focus = chosen
+    if chosen not in session.topics_covered:
+        session.topics_covered.append(chosen)
+    print(f"  {GREEN}✅ Topic focus set to:{RESET} {BOLD}{chosen}{RESET}")
+
+
+def apply_topic_focus(question: str, topic_focus: str) -> str:
+    """Inject topic focus into the question so retrieval steers to that area."""
+    if not topic_focus:
+        return question
+    return f"[Focus on topic: {topic_focus}] {question}"
+
+
 # ─── Exercises ────────────────────────────────────────────────────────────────
 
 async def run_exercise(session: TutorSession, knowledge: List[Dict]) -> None:
@@ -254,10 +294,13 @@ async def run_exercise(session: TutorSession, knowledge: List[Dict]) -> None:
     from config import build_prompt
 
     exercise_prompt = build_prompt(
-        question=f"Generate ONE practice exercise for a {session.cefr_level} Turkish student. "
-                 "Pick the most useful exercise type for this level. "
-                 "Present the question clearly, then wait for the student to answer. "
-                 "Do NOT provide the answer yet.",
+        question=apply_topic_focus(
+            question=f"Generate ONE practice exercise for a {session.cefr_level} Turkish student. "
+                     "Pick the most useful exercise type for this level. "
+                     "Present the question clearly, then wait for the student to answer. "
+                     "Do NOT provide the answer yet.",
+            topic_focus=session.topic_focus,
+        ),
         knowledge_base=knowledge,
         cefr_level=session.cefr_level,
         conversation_history=session.history,
@@ -278,8 +321,11 @@ async def run_exercise(session: TutorSession, knowledge: List[Dict]) -> None:
 
     # Evaluate answer
     eval_prompt = build_prompt(
-        question=f"The student answered: '{answer}'. Evaluate this answer to the exercise you just gave. "
-                 "Was it correct? Explain why. Give the correct answer and a brief explanation.",
+        question=apply_topic_focus(
+            question=f"The student answered: '{answer}'. Evaluate this answer to the exercise you just gave. "
+                     "Was it correct? Explain why. Give the correct answer and a brief explanation.",
+            topic_focus=session.topic_focus,
+        ),
         knowledge_base=knowledge,
         cefr_level=session.cefr_level,
         conversation_history=session.history,
@@ -336,8 +382,11 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
 
     # Opening message
     opening_prompt = build_prompt(
-        question=f"Introduce yourself warmly to a new {session.cefr_level} student starting their first Turkish lesson. "
-                 "Tell them what you'll cover today based on their level. Keep it to 3-4 sentences. Be encouraging!",
+        question=apply_topic_focus(
+            question=f"Introduce yourself warmly to a new {session.cefr_level} student starting their first Turkish lesson. "
+                     "Tell them what you'll cover today based on their level. Keep it to 3-4 sentences. Be encouraging!",
+            topic_focus=session.topic_focus,
+        ),
         knowledge_base=knowledge,
         cefr_level=session.cefr_level,
         conversation_history=[],
@@ -376,6 +425,9 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
         elif cmd == "/level":
             cmd_level_change(session, CEFR_LEVELS)
             continue
+        elif cmd == "/topic":
+            cmd_topic_change(session, knowledge)
+            continue
         elif cmd == "/exercise":
             await run_exercise(session, knowledge)
             continue
@@ -387,7 +439,7 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
         session.add_exchange("user", user_input)
 
         prompt = build_prompt(
-            question=user_input,
+            question=apply_topic_focus(user_input, session.topic_focus),
             knowledge_base=knowledge,
             cefr_level=session.cefr_level,
             conversation_history=session.history[:-1],  # exclude most recent (already have it)
@@ -407,11 +459,11 @@ async def run_tutor(args):
 
     print_banner()
 
-    # Initialize Ollama
-    if not _init_ollama(model=args.model):
-        print(f"  {RED}⚠️  Ollama is not running or model not found.{RESET}")
-        print(f"  {GRAY}Start Ollama:  ollama serve{RESET}")
-        print(f"  {GRAY}Pull model:    ollama pull turkish-gemma{RESET}\n")
+    # Initialize Gemini
+    if not _init_gemini():
+        print(f"  {RED}⚠️  GEMINI_API_KEY not set in .env{RESET}")
+        print(f"  {GRAY}Add your key to .env: GEMINI_API_KEY=your_key_here{RESET}")
+        print(f"  {GRAY}Get a free key at: https://aistudio.google.com{RESET}\n")
         sys.exit(1)
 
     # Load knowledge base (auto-build if missing)
@@ -420,7 +472,7 @@ async def run_tutor(args):
         print(f"  {RED}❌ Knowledge base is empty. Run: python dataset.py{RESET}")
         sys.exit(1)
 
-    print(f"  {GREEN}✅ Ollama ({_ollama_model})  |  📚 {len(knowledge)} topics  |  🔒 Offline{RESET}\n")
+    print(f"  {GREEN}✅ Gemini connected  |  📚 {len(knowledge)} topics{RESET}\n")
 
     # Determine CEFR level
     cefr_level = args.level.upper() if args.level else None
@@ -428,12 +480,18 @@ async def run_tutor(args):
         print(f"  {BOLD}What is your current Turkish level?{RESET}")
         for lvl, info in CEFR_LEVELS.items():
             print(f"    {CYAN}{lvl}{RESET} — {info['name']}: {GRAY}{info['description'][:55]}...{RESET}")
-        print(f"\n  Enter level (A1/A2/B1/B2/C1/C2) or press Enter for A1: ", end="")
+        print("\n  Enter level (A1/A2/B1/B2/C1/C2) or press Enter for A1: ", end="")
         choice = input().strip().upper()
         cefr_level = choice if choice in CEFR_LEVELS else "A1"
 
     # Create session
     session = TutorSession(cefr_level=cefr_level)
+
+    if args.topic:
+        session.topic_focus = args.topic.strip()
+        if session.topic_focus and session.topic_focus not in session.topics_covered:
+            session.topics_covered.append(session.topic_focus)
+        print(f"  {GREEN}🎯 Topic focus:{RESET} {BOLD}{session.topic_focus}{RESET}")
 
     # If --exercise flag, jump straight to exercise
     if args.exercise:
@@ -452,8 +510,7 @@ def main():
                         help="CEFR level to start at (default: ask on startup)")
     parser.add_argument("--topic", type=str, help="Specific topic to focus on")
     parser.add_argument("--exercise", action="store_true", help="Start immediately with an exercise")
-    parser.add_argument("--model", type=str, default="turkish-gemma:latest",
-                        help="Ollama model to use (default: turkish-gemma:latest)")
+
     args = parser.parse_args()
 
     asyncio.run(run_tutor(args))

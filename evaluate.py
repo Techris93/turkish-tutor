@@ -2,7 +2,7 @@
 Türkçe Hoca — Evaluator
 Scores the tutor config.py against the test Q&A dataset.
 Used by the autoresearch swarm to compare experiment branches.
-Runs fully offline via Ollama (Turkish-Gemma).
+Powered by Google Gemini.
 
 Metrics:
   - answer_accuracy:    semantic similarity of AI answers vs gold standard
@@ -21,8 +21,7 @@ import sys
 import json
 import asyncio
 import argparse
-import urllib.request
-import urllib.error
+from config import MODEL
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -30,60 +29,74 @@ DATA_DIR    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 TEST_FILE   = os.path.join(DATA_DIR, "test_qa.json")
 RESULTS_DIR = os.path.join(DATA_DIR, "eval_results")
 
-OLLAMA_AVAILABLE = False
-_ollama_model = "turkish-gemma:latest"
+GEMINI_STATE = {
+    "available": False,
+    "client": None,
+}
 
 
-def _init_ollama(model: str = None):
-    """Check if Ollama is running and the requested model is available."""
-    global OLLAMA_AVAILABLE, _ollama_model
-    if model:
-        _ollama_model = model
+def _read_env_api_key() -> str:
+    """Read API key from environment or .env file."""
+    env_key = os.environ.get("GEMINI_API_KEY")
+    if env_key:
+        return env_key.strip()
+
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.exists(env_path):
+        return ""
+
+    with open(env_path, encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or not line.startswith("GEMINI_API_KEY="):
+                continue
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+
+    return ""
+
+def _init_gemini():
+    """Initialize the Google Gemini API client."""
+    api_key = _read_env_api_key()
+
+    if not api_key:
+        return False
+
     try:
-        req = urllib.request.Request("http://localhost:11434/api/tags")
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read())
-        available = [m["name"] for m in data.get("models", [])]
-        base = _ollama_model.split(":")[0]
-        if _ollama_model in available or any(base in m for m in available):
-            for m in available:
-                if base in m:
-                    _ollama_model = m
-                    break
-            OLLAMA_AVAILABLE = True
-            return True
-        return False
-    except (urllib.error.URLError, OSError):
-        return False
+        # Modern SDK (required): google.genai
+        from google import genai as modern_genai  # type: ignore
 
+        GEMINI_STATE["client"] = modern_genai.Client(api_key=api_key)
+        GEMINI_STATE["available"] = True
+        return True
+    except (ImportError, RuntimeError, ValueError, OSError):
+        GEMINI_STATE["available"] = False
+        GEMINI_STATE["client"] = None
+    return False
+
+
+def _generate_text(prompt: str, max_tokens: int) -> str:
+    """Generate text using google.genai client."""
+    client = GEMINI_STATE.get("client")
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config={"max_output_tokens": max_tokens},
+    )
+    text = getattr(response, "text", "")
+    return text.strip() if text else ""
 
 async def _generate(prompt: str, max_tokens: int = 400) -> str:
-    """Generate text using Ollama."""
-    if not OLLAMA_AVAILABLE:
+    """Generate text using Gemini."""
+    if not GEMINI_STATE["available"]:
         return ""
     try:
-        loop = asyncio.get_event_loop()
-        payload = json.dumps({
-            "model": _ollama_model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.2,
-                "num_predict": max_tokens,
-            }
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
-            lambda: urllib.request.urlopen(req, timeout=120)
+            lambda: _generate_text(prompt, max_tokens)
         )
-        data = json.loads(response.read())
-        return data.get("response", "").strip()
-    except Exception:
+        return response if response else ""
+    except (RuntimeError, ValueError, OSError, AttributeError):
         return "[error: generation failed]"
 
 
@@ -224,6 +237,7 @@ async def run_evaluation(
     level_filter: Optional[str] = None,
     verbose: bool = False,
     max_questions: int = 20,
+    concurrency: int = 4,
 ) -> Dict[str, Any]:
     """Run the full evaluation suite."""
     if not os.path.exists(TEST_FILE):
@@ -245,11 +259,28 @@ async def run_evaluation(
         print(f" (level: {level_filter})", end="")
     print("...\n")
 
-    results = []
-    for i, qa in enumerate(questions):
-        print(f"  [{i+1:2d}/{len(questions)}] {qa['question'][:50]}...", end="\r", flush=True)
-        result = await evaluate_question(qa, knowledge, verbose=verbose)
-        results.append(result)
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+    completed = 0
+
+    async def evaluate_indexed(index: int, qa: Dict[str, Any]):
+        nonlocal completed
+        async with semaphore:
+            result = await evaluate_question(qa, knowledge, verbose=verbose)
+            completed += 1
+            print(
+                f"  [{completed:2d}/{len(questions)}] {qa['question'][:50]}...",
+                end="\r",
+                flush=True,
+            )
+            return index, result
+
+    tasks = [
+        asyncio.create_task(evaluate_indexed(i, qa))
+        for i, qa in enumerate(questions)
+    ]
+    indexed_results = await asyncio.gather(*tasks)
+    indexed_results.sort(key=lambda item: item[0])
+    results = [result for _, result in indexed_results]
 
     print(" " * 70, end="\r")  # clear the last line
 
@@ -301,14 +332,14 @@ def print_results(summary: Dict):
     composite = scores.get("composite", 0)
 
     print(f"\n{'═' * 55}")
-    print(f"  🇹🇷 Turkish Tutor — Evaluation Results")
+    print("  🇹🇷 Turkish Tutor — Evaluation Results")
     print(f"{'═' * 55}")
     print(f"  Questions: {summary['questions_evaluated']}")
     print(f"\n  Composite Score:    {composite:.4f}  ({'🟢 Good' if composite >= 0.7 else '🟡 OK' if composite >= 0.5 else '🔴 Needs work'})")
     print(f"  Accuracy:           {scores.get('accuracy', 0):.4f}")
     print(f"  Pedagogy:           {scores.get('pedagogy', 0):.4f}")
     print(f"  Turkish Correctness:{scores.get('turkish_correctness', 0):.4f}")
-    print(f"\n  By Category:")
+    print("\n  By Category:")
     for cat, score in sorted(summary.get("by_category", {}).items(), key=lambda x: -x[1]):
         bar = "█" * int(score * 20)
         print(f"    {cat:25s} {score:.3f}  {bar}")
@@ -316,17 +347,16 @@ def print_results(summary: Dict):
 
 
 async def main_async(args):
-    if not _init_ollama(model=args.model):
-        print("❌ Ollama is not running or model not found.")
-        print("  Start Ollama: ollama serve")
-        print("  Pull model:   ollama pull turkish-gemma")
+    if not _init_gemini():
+        print("❌ GEMINI_API_KEY not set in .env")
         sys.exit(1)
-    print(f"  🔒 Using Ollama ({_ollama_model})")
+    print("  ☁️  Using Gemini API")
 
     summary = await run_evaluation(
         level_filter=args.level,
         verbose=args.verbose,
         max_questions=args.max_questions,
+        concurrency=args.concurrency,
     )
 
     if not summary:
@@ -338,7 +368,7 @@ async def main_async(args):
     composite = summary["scores"]["composite"]
     print(f"  Results saved: {path}")
     print(f"\n  Composite F1-equivalent: {composite:.4f}")
-    print(f"  (This score is used by swarm.py to rank experiment branches)\n")
+    print("  (This score is used by swarm.py to rank experiment branches)\n")
 
 
 def main():
@@ -348,8 +378,9 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Show per-question scores")
     parser.add_argument("--max-questions", type=int, default=20,
                         help="Max questions to evaluate (default: 20)")
-    parser.add_argument("--model", type=str, default="turkish-gemma:latest",
-                        help="Ollama model to use (default: turkish-gemma:latest)")
+    parser.add_argument("--concurrency", type=int, default=4,
+                        help="Number of concurrent question evaluations (default: 4)")
+
     args = parser.parse_args()
     asyncio.run(main_async(args))
 

@@ -75,18 +75,44 @@ export default function Home() {
   const [typeFilter, setTypeFilter] = useState("all");
 
   useEffect(() => {
-    fetch(`${API_URL}/api/health`)
-      .then((response) => response.json())
-      .then(setHealth)
-      .catch(() =>
-        setHealth({
-          ok: false,
-          gemini_ready: false,
-          model: "unknown",
-          topics: 0,
-          error: "API unavailable"
-        })
-      );
+    let cancelled = false;
+    let attempts = 0;
+
+    const checkHealth = async () => {
+      attempts += 1;
+      try {
+        const response = await fetch(`${API_URL}/api/health`, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`);
+        }
+        const payload = await response.json();
+        if (!cancelled) {
+          setHealth(payload);
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setHealth({
+            ok: false,
+            gemini_ready: false,
+            model: "unknown",
+            topics: 0,
+            error: caught instanceof Error ? caught.message : "API unavailable"
+          });
+        }
+      }
+    };
+
+    checkHealth();
+    const interval = window.setInterval(() => {
+      if (attempts < 24) {
+        checkHealth();
+      }
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, []);
 
   useEffect(() => {
@@ -160,6 +186,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API_URL}/api/study`, {
         method: "POST",
+        cache: "no-store",
         body
       });
       const payload = await response.json();

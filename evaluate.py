@@ -32,6 +32,7 @@ RESULTS_DIR = os.path.join(DATA_DIR, "eval_results")
 GEMINI_STATE = {
     "available": False,
     "client": None,
+    "error": "",
 }
 
 
@@ -59,6 +60,7 @@ def _init_gemini():
     api_key = _read_env_api_key()
 
     if not api_key:
+        GEMINI_STATE["error"] = "GEMINI_API_KEY is missing. Add it to .env or your environment."
         return False
 
     try:
@@ -67,10 +69,12 @@ def _init_gemini():
 
         GEMINI_STATE["client"] = modern_genai.Client(api_key=api_key)
         GEMINI_STATE["available"] = True
+        GEMINI_STATE["error"] = ""
         return True
-    except (ImportError, RuntimeError, ValueError, OSError):
+    except (ImportError, RuntimeError, ValueError, OSError) as exc:
         GEMINI_STATE["available"] = False
         GEMINI_STATE["client"] = None
+        GEMINI_STATE["error"] = f"Could not initialize google-genai: {exc}"
     return False
 
 
@@ -348,7 +352,8 @@ def print_results(summary: Dict):
 
 async def main_async(args):
     if not _init_gemini():
-        print("❌ GEMINI_API_KEY not set in .env")
+        print(f"❌ Gemini is not ready: {GEMINI_STATE.get('error')}")
+        print("   Setup: pip install -r requirements.txt, then add GEMINI_API_KEY to .env")
         sys.exit(1)
     print("  ☁️  Using Gemini API")
 

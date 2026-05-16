@@ -1,6 +1,12 @@
 __pycache__/
 *.pyc
 *.pyo
+.venv/
+.logs/
+node_modules/
+.next/
+web/node_modules/
+web/.next/
 .env
 data/knowledge.json
 data/test_qa.json

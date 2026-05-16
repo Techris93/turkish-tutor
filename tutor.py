@@ -11,11 +11,19 @@ Usage:
 import os
 import sys
 import json
+import shlex
 import argparse
 import asyncio
 from config import MODEL
 from datetime import datetime
 from typing import List, Dict
+
+from content_intelligence import (
+    ExtractionError,
+    build_study_prompt,
+    extract_content,
+)
+from speech import SpeechError, SpeechOptions, format_voice_list, speak
 
 # ─── Terminal Colors ──────────────────────────────────────────────────────────
 RESET  = "\033[0m"
@@ -39,6 +47,7 @@ SESSIONS_FILE  = os.path.join(DATA_DIR, "sessions.json")
 GEMINI_STATE = {
     "available": False,
     "client": None,
+    "error": "",
 }
 
 
@@ -66,6 +75,7 @@ def _init_gemini():
     api_key = _read_env_api_key()
 
     if not api_key:
+        GEMINI_STATE["error"] = "GEMINI_API_KEY is missing. Add it to .env or your environment."
         return False
 
     try:
@@ -74,10 +84,12 @@ def _init_gemini():
 
         GEMINI_STATE["client"] = modern_genai.Client(api_key=api_key)
         GEMINI_STATE["available"] = True
+        GEMINI_STATE["error"] = ""
         return True
-    except (ImportError, RuntimeError, ValueError, OSError):
+    except (ImportError, RuntimeError, ValueError, OSError) as exc:
         GEMINI_STATE["available"] = False
         GEMINI_STATE["client"] = None
+        GEMINI_STATE["error"] = f"Could not initialize google-genai: {exc}"
     return False
 
 
@@ -204,7 +216,7 @@ def print_separator():
 
 
 def print_quick_help():
-    print(f"\n{GRAY}Commands: /level, /topic, /exercise, /progress, /help, /quit{RESET}")
+    print(f"\n{GRAY}Commands: /study, /read, /voices, /level, /topic, /exercise, /progress, /help, /quit{RESET}")
 
 
 # ─── Commands ─────────────────────────────────────────────────────────────────
@@ -216,6 +228,14 @@ def cmd_help():
   {CYAN}/topic{RESET}      — Choose a specific topic to study
   {CYAN}/exercise{RESET}   — Get a practice exercise
   {CYAN}/vocab{RESET}      — Vocabulary flashcard drill
+  {CYAN}/study{RESET}      — Translate/explain typed text or a file/image/PDF
+                Examples:
+                  /study Merhaba, nasılsın?
+                  /study --level B1 --target English /path/to/book.pdf
+                  /study --target Spanish /path/to/photo.jpg
+  {CYAN}/read{RESET}       — Read text aloud with TTS. Use /read last for the last tutor reply
+                Options: --lang tr --voice Yelda --rate 170
+  {CYAN}/voices{RESET}     — List local voices, optionally filtered: /voices tr
   {CYAN}/progress{RESET}   — Show your session progress
   {CYAN}/quit / /exit{RESET} — End the session
   {CYAN}/help{RESET}       — Show this help menu
@@ -285,6 +305,118 @@ def apply_topic_focus(question: str, topic_focus: str) -> str:
     if not topic_focus:
         return question
     return f"[Focus on topic: {topic_focus}] {question}"
+
+
+def parse_option_payload(raw: str) -> tuple[dict, str]:
+    """Parse simple --key value options and return remaining payload."""
+    try:
+        tokens = shlex.split(raw)
+    except ValueError:
+        tokens = raw.split()
+
+    options = {}
+    payload = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token.startswith("--"):
+            key = token[2:].replace("-", "_")
+            if i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
+                options[key] = tokens[i + 1]
+                i += 2
+            else:
+                options[key] = "true"
+                i += 1
+        else:
+            payload.append(token)
+            i += 1
+    return options, " ".join(payload).strip()
+
+
+def last_assistant_text(session: TutorSession) -> str:
+    for turn in reversed(session.history):
+        if turn.get("role") == "assistant" and turn.get("content"):
+            return turn["content"]
+    return ""
+
+
+def normalize_level(level: str, fallback: str) -> str:
+    from config import CEFR_LEVELS
+    level = (level or fallback).upper()
+    return level if level in CEFR_LEVELS else fallback
+
+
+async def run_study_analysis(
+    raw_payload: str,
+    session: TutorSession,
+    knowledge: List[Dict],
+) -> None:
+    """Extract Turkish study content, translate it, explain it, and generate examples."""
+    from config import retrieve_context
+
+    options, payload = parse_option_payload(raw_payload)
+    if not payload:
+        print(f"\n{BOLD}Paste text or enter a local file path/image/PDF to study:{RESET}")
+        print_prompt()
+        payload = input().strip()
+
+    target_language = options.get("target") or options.get("language") or "English"
+
+    try:
+        extracted = extract_content(payload, current_level=session.cefr_level)
+    except ExtractionError as exc:
+        print(f"\n  {RED}Could not extract input:{RESET} {exc}")
+        return
+
+    requested_level = normalize_level(options.get("level", ""), extracted.inferred_level or session.cefr_level)
+    session.cefr_level = requested_level
+
+    print(f"\n{BOLD}{BLUE}📥 Extracted Input:{RESET}")
+    print(f"  Source: {extracted.source_type} — {extracted.source_label}")
+    print(f"  Inferred level: {BOLD}{GREEN}{extracted.inferred_level}{RESET}  |  Studying as: {BOLD}{GREEN}{requested_level}{RESET}")
+    print(f"  Detected units: {len(extracted.units)}")
+    print(f"\n{GRAY}{extracted.preview}{RESET}\n")
+
+    knowledge_context = retrieve_context(
+        extracted.text,
+        knowledge,
+        requested_level,
+    )
+    prompt = build_study_prompt(
+        extracted=extracted,
+        target_language=target_language,
+        cefr_level=requested_level,
+        knowledge_context=knowledge_context,
+    )
+
+    print(f"{GRAY}(translating, explaining, and generating {requested_level} examples...){RESET}", end="\r", flush=True)
+    response = await ask_llm(prompt)
+    clear_line()
+    print_tutor(response)
+    session.add_exchange("user", f"/study {payload}")
+    session.add_exchange("assistant", response)
+
+
+def run_text_to_speech(raw_payload: str, session: TutorSession) -> None:
+    """Read text aloud with language, voice, and speed controls."""
+    options, payload = parse_option_payload(raw_payload)
+    if not payload or payload.lower() == "last":
+        payload = last_assistant_text(session)
+
+    language = options.get("lang") or options.get("language") or "auto"
+    voice = options.get("voice")
+    try:
+        rate = int(options.get("rate", "175"))
+    except ValueError:
+        rate = 175
+
+    try:
+        speak(payload, SpeechOptions(language=language, voice=voice, rate=rate))
+    except SpeechError as exc:
+        print(f"\n  {RED}Could not read aloud:{RESET} {exc}")
+        return
+
+    print(f"  {GREEN}Read aloud complete.{RESET}")
 
 
 # ─── Exercises ────────────────────────────────────────────────────────────────
@@ -413,6 +545,7 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
 
         # Commands
         cmd = user_input.lower().strip()
+        head, _, command_payload = user_input.partition(" ")
         if cmd in ("/quit", "/exit", "/q"):
             print(f"\n  {GREEN}Güle güle! (Goodbye!) Great session! Hoşça kal! 🇹🇷{RESET}\n")
             break
@@ -433,6 +566,17 @@ async def chat_loop(session: TutorSession, knowledge: List[Dict]) -> None:
             continue
         elif cmd == "/vocab":
             run_vocab_drill(session, knowledge)
+            continue
+        elif head.lower() in ("/study", "/ocr", "/translate"):
+            await run_study_analysis(command_payload, session, knowledge)
+            continue
+        elif head.lower() == "/read":
+            run_text_to_speech(command_payload, session)
+            continue
+        elif head.lower() == "/voices":
+            language = command_payload.strip() or "auto"
+            print(f"\n{BOLD}Available voices:{RESET}")
+            print(format_voice_list(language))
             continue
 
         # Regular question/message
@@ -461,9 +605,9 @@ async def run_tutor(args):
 
     # Initialize Gemini
     if not _init_gemini():
-        print(f"  {RED}⚠️  GEMINI_API_KEY not set in .env{RESET}")
-        print(f"  {GRAY}Add your key to .env: GEMINI_API_KEY=your_key_here{RESET}")
-        print(f"  {GRAY}Get a free key at: https://aistudio.google.com{RESET}\n")
+        print(f"  {RED}⚠️  Gemini is not ready.{RESET}")
+        print(f"  {GRAY}{GEMINI_STATE.get('error') or 'Check your Gemini API key and google-genai installation.'}{RESET}")
+        print(f"  {GRAY}Setup: pip install -r requirements.txt, then add GEMINI_API_KEY to .env{RESET}\n")
         sys.exit(1)
 
     # Load knowledge base (auto-build if missing)
@@ -493,6 +637,12 @@ async def run_tutor(args):
             session.topics_covered.append(session.topic_focus)
         print(f"  {GREEN}🎯 Topic focus:{RESET} {BOLD}{session.topic_focus}{RESET}")
 
+    if args.study:
+        await run_study_analysis(args.study, session, knowledge)
+        session.save()
+        print(f"  {GRAY}Session saved. Total exchanges: {session.exchange_count}{RESET}\n")
+        return
+
     # If --exercise flag, jump straight to exercise
     if args.exercise:
         await run_exercise(session, knowledge)
@@ -510,6 +660,8 @@ def main():
                         help="CEFR level to start at (default: ask on startup)")
     parser.add_argument("--topic", type=str, help="Specific topic to focus on")
     parser.add_argument("--exercise", action="store_true", help="Start immediately with an exercise")
+    parser.add_argument("--study", type=str,
+                        help="Analyze typed text or a local file/image/PDF, then exit")
 
     args = parser.parse_args()
 

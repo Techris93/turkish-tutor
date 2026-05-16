@@ -1,8 +1,12 @@
 google-genai>=0.3.0
-python-dotenv>=1.0.0
-requests>=2.31.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.12
+pypdf>=5.0.0
+Pillow>=10.0.0
+pytesseract>=0.3.13
+python-docx>=1.1.0
 
-# Optional — for HuggingFace dataset fetching:
+# Optional — for HuggingFace dataset fetching and cross-platform TTS fallback:
 # datasets>=2.18.0
-# beautifulsoup4>=4.12.0
-# PyPDF2>=3.0.0
+# pyttsx3>=2.90

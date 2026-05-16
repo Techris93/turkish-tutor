@@ -3,7 +3,7 @@ services:
     name: turkish-tutor-api
     runtime: docker
     plan: free
-    branch: experiment/agent-1
+    branch: main
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
     healthCheckPath: /api/health
@@ -17,7 +17,7 @@ services:
     name: turkish-tutor-web
     runtime: static
     plan: free
-    branch: experiment/agent-1
+    branch: main
     rootDir: web
     buildCommand: npm ci && npm run build
     staticPublishPath: ./out

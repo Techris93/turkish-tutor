@@ -7,6 +7,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Search,
   Send,
   Square,
   Upload
@@ -27,7 +28,21 @@ type StudyResponse = {
   target_language: string;
   preview: string;
   units: StudyUnit[];
+  vocabulary_cards: VocabularyCard[];
+  vocabulary_warning: string;
   note: string;
+};
+
+type VocabularyCard = {
+  turkish: string;
+  item_type: string;
+  translation: string;
+  cefr_level: string;
+  example_tr: string;
+  example_translation: string;
+  learner_note: string;
+  tts_word: string;
+  tts_sentence: string;
 };
 
 type HealthResponse = {
@@ -56,6 +71,8 @@ export default function Home() {
   const [speechRate, setSpeechRate] = useState(1);
   const [speaking, setSpeaking] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
 
   useEffect(() => {
     fetch(`${API_URL}/api/health`)
@@ -105,6 +122,28 @@ export default function Home() {
     return (listenPractice || result.note).replace(/[#*_`>-]/g, " ").trim();
   }, [result, text]);
 
+  const cardTypes = useMemo(() => {
+    const types = new Set(result?.vocabulary_cards.map((card) => card.item_type) ?? []);
+    return ["all", ...Array.from(types).sort()];
+  }, [result]);
+
+  const filteredCards = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return (result?.vocabulary_cards ?? []).filter((card) => {
+      const matchesType = typeFilter === "all" || card.item_type === typeFilter;
+      const haystack = [
+        card.turkish,
+        card.translation,
+        card.example_tr,
+        card.example_translation,
+        card.item_type
+      ]
+        .join(" ")
+        .toLowerCase();
+      return matchesType && (!query || haystack.includes(query));
+    });
+  }, [result, search, typeFilter]);
+
   async function submitStudy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -140,33 +179,56 @@ export default function Home() {
     setFile(event.target.files?.[0] ?? null);
   }
 
-  function speak() {
-    if (!("speechSynthesis" in window) || !readableText) {
+  function selectVoice() {
+    return (
+      voices.find((item) => item.name === selectedVoice) ??
+      turkishVoices[0] ??
+      voices.find((item) => item.lang.toLowerCase().startsWith("tr")) ??
+      voices.find((item) => item.lang.toLowerCase().startsWith("en"))
+    );
+  }
+
+  function speakTexts(texts: string[]) {
+    const queue = texts.map((item) => item.trim()).filter(Boolean);
+    if (!("speechSynthesis" in window) || queue.length === 0) {
       return;
     }
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(readableText);
-    utterance.lang = "tr-TR";
-    utterance.rate = speechRate;
-    const voice =
-      voices.find((item) => item.name === selectedVoice) ??
-      turkishVoices[0] ??
-      voices.find((item) => item.lang.toLowerCase().startsWith("en"));
-    if (voice) {
-      utterance.voice = voice;
-      utterance.lang = voice.lang;
-    }
-    utterance.onend = () => {
-      setSpeaking(false);
-      setPaused(false);
+
+    const voice = selectVoice();
+    let index = 0;
+
+    const playNext = () => {
+      if (index >= queue.length) {
+        setSpeaking(false);
+        setPaused(false);
+        return;
+      }
+      const utterance = new SpeechSynthesisUtterance(queue[index]);
+      utterance.lang = "tr-TR";
+      utterance.rate = speechRate;
+      if (voice) {
+        utterance.voice = voice;
+        utterance.lang = voice.lang;
+      }
+      utterance.onend = () => {
+        index += 1;
+        playNext();
+      };
+      utterance.onerror = () => {
+        setSpeaking(false);
+        setPaused(false);
+      };
+      window.speechSynthesis.speak(utterance);
     };
-    utterance.onerror = () => {
-      setSpeaking(false);
-      setPaused(false);
-    };
-    window.speechSynthesis.speak(utterance);
+
     setSpeaking(true);
     setPaused(false);
+    playNext();
+  }
+
+  function speak() {
+    speakTexts([readableText]);
   }
 
   function pauseOrResume() {
@@ -324,6 +386,28 @@ export default function Home() {
                 </button>
                 <button
                   className="ghost-button"
+                  disabled={!result?.vocabulary_cards.length}
+                  type="button"
+                  onClick={() =>
+                    speakTexts((result?.vocabulary_cards ?? []).map((card) => card.tts_word))
+                  }
+                >
+                  <Play size={18} />
+                  Words
+                </button>
+                <button
+                  className="ghost-button"
+                  disabled={!result?.vocabulary_cards.length}
+                  type="button"
+                  onClick={() =>
+                    speakTexts((result?.vocabulary_cards ?? []).map((card) => card.tts_sentence))
+                  }
+                >
+                  <Play size={18} />
+                  Examples
+                </button>
+                <button
+                  className="ghost-button"
                   disabled={!speaking}
                   type="button"
                   onClick={pauseOrResume}
@@ -341,6 +425,11 @@ export default function Home() {
                   <Square size={18} />
                 </button>
               </div>
+              {!turkishVoices.length ? (
+                <p className="voice-warning">
+                  No Turkish browser voice is currently available. Playback will use the closest installed voice.
+                </p>
+              ) : null}
             </div>
           </section>
 
@@ -382,6 +471,82 @@ export default function Home() {
                   <div className="field" style={{ marginTop: 16 }}>
                     <label>Preview</label>
                     <div className="preview">{result.preview}</div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-header">
+                  <div className="panel-title">
+                    <FileText size={18} />
+                    <h2>Vocabulary Cards</h2>
+                  </div>
+                  <strong>{filteredCards.length}/{result.vocabulary_cards.length}</strong>
+                </div>
+                <div className="panel-body">
+                  {result.vocabulary_warning ? (
+                    <div className="warning">{result.vocabulary_warning}</div>
+                  ) : null}
+                  <div className="filters">
+                    <div className="search-box">
+                      <Search size={16} />
+                      <input
+                        aria-label="Search vocabulary"
+                        placeholder="Search words, translations, examples"
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                      />
+                    </div>
+                    <select
+                      aria-label="Filter by type"
+                      value={typeFilter}
+                      onChange={(event) => setTypeFilter(event.target.value)}
+                    >
+                      {cardTypes.map((type) => (
+                        <option key={type} value={type}>
+                          {type === "all" ? "All types" : type}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="vocab-list">
+                    {filteredCards.map((card, index) => (
+                      <article className="vocab-card" key={`${card.turkish}-${index}`}>
+                        <div className="vocab-main">
+                          <div>
+                            <span className="pill">{card.item_type}</span>
+                            <h3>{card.turkish}</h3>
+                            <p>{card.translation}</p>
+                          </div>
+                          <div className="vocab-actions">
+                            <button
+                              aria-label={`Play ${card.turkish}`}
+                              className="icon-button"
+                              type="button"
+                              onClick={() => speakTexts([card.tts_word])}
+                            >
+                              <Play size={16} />
+                            </button>
+                            <button
+                              aria-label={`Play example for ${card.turkish}`}
+                              className="icon-button"
+                              type="button"
+                              onClick={() => speakTexts([card.tts_sentence])}
+                            >
+                              <Headphones size={16} />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="example-block">
+                          <strong>{card.example_tr}</strong>
+                          <span>{card.example_translation}</span>
+                        </div>
+                        <div className="card-foot">
+                          <span>{card.cefr_level}</span>
+                          <span>{card.learner_note}</span>
+                        </div>
+                      </article>
+                    ))}
                   </div>
                 </div>
               </section>

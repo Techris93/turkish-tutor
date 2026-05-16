@@ -6,6 +6,7 @@ from content_intelligence import (
     detect_language,
     extract_content,
     extract_turkish_units,
+    extract_vocabulary_items,
     infer_cefr_level,
 )
 
@@ -41,7 +42,32 @@ class ContentIntelligenceTests(unittest.TestCase):
         self.assertEqual(len(units), 2)
         self.assertFalse(all(unit.turkish_signal for unit in units))
 
+    def test_vocabulary_table_splits_rows_into_items(self):
+        text = """İSİMLER FİİLLER
+arkadaş çarşı inek mavi salon açmak
+anneler günü çay İngiliz mayıs sandalye bakmak
+çocuk odası doğum günü cevap vermek tekrar etmek"""
+        items = extract_vocabulary_items(text)
+        words = [item.text for item in items]
+        self.assertNotIn("İSİMLER", words)
+        self.assertNotIn("FİİLLER", words)
+        self.assertIn("arkadaş", words)
+        self.assertIn("çarşı", words)
+        self.assertIn("açmak", words)
+        self.assertIn("anneler günü", words)
+        self.assertIn("çocuk odası", words)
+        self.assertIn("doğum günü", words)
+        self.assertIn("cevap vermek", words)
+        self.assertIn("tekrar etmek", words)
+
+    def test_vocabulary_table_infers_basic_types(self):
+        items = {item.text: item.item_type for item in extract_vocabulary_items("mavi Almanya Alman bakmak cevap vermek")}
+        self.assertEqual(items["mavi"], "adjective/color")
+        self.assertEqual(items["Almanya"], "place/country")
+        self.assertEqual(items["Alman"], "nationality")
+        self.assertEqual(items["bakmak"], "verb")
+        self.assertEqual(items["cevap vermek"], "verb")
+
 
 if __name__ == "__main__":
     unittest.main()
-

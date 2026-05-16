@@ -1,0 +1,14 @@
+.git
+.venv
+.logs
+__pycache__
+*.pyc
+.env
+web/node_modules
+web/.next
+web/out
+node_modules
+.next
+data/sessions.json
+data/eval_results
+data/harvest_log.json

@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: turkish-tutor-api
+    runtime: docker
+    plan: free
+    branch: experiment/agent-1
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN
+        value: https://turkish-tutor-web.onrender.com
+
+  - type: web
+    name: turkish-tutor-web
+    runtime: static
+    plan: free
+    branch: experiment/agent-1
+    rootDir: web
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./out
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://turkish-tutor-api.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

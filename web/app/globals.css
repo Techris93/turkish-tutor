@@ -302,6 +302,21 @@ input[type="file"]:focus {
   margin-top: 12px;
 }
 
+.warning,
+.voice-warning {
+  border: 1px solid rgba(166, 95, 0, 0.24);
+  background: #fff8e8;
+  color: #744200;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin: 0 0 14px;
+  line-height: 1.35;
+}
+
+.voice-warning {
+  margin: 12px 0 0;
+}
+
 .meta-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -334,6 +349,116 @@ input[type="file"]:focus {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.search-box {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.search-box svg {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.search-box input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+}
+
+.vocab-list {
+  max-height: 720px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.vocab-card {
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.vocab-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.vocab-main h3 {
+  margin: 8px 0 4px;
+  font-size: 1.08rem;
+}
+
+.vocab-main p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.vocab-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(35, 100, 170, 0.1);
+  color: var(--blue);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.example-block {
+  border-left: 3px solid var(--green);
+  padding-left: 12px;
+  display: grid;
+  gap: 4px;
+  line-height: 1.4;
+}
+
+.example-block span,
+.card-foot {
+  color: var(--muted);
+}
+
+.card-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.card-foot span:first-child {
+  color: var(--green);
+  font-weight: 800;
 }
 
 .unit {
@@ -425,8 +550,14 @@ input[type="range"] {
   }
 
   .meta-grid,
-  .tts-grid {
+  .tts-grid,
+  .filters {
     grid-template-columns: 1fr;
+  }
+
+  .vocab-main,
+  .card-foot {
+    flex-direction: column;
   }
 
   .brand p {

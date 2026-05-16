@@ -15,6 +15,7 @@ An adaptive AI language tutor for Turkish, powered by Google Gemini. Uses the **
 - 🃏 **Vocabulary flashcard drill** — `/vocab` command
 - 🖼️ **Image/PDF/text study intake** — `/study` extracts Turkish from typed text, images, PDFs, DOCX, and text files
 - 🌍 **Translation + CEFR examples** — translates extracted words/phrases/sentences and generates A1-C2 practice lines
+- 🧾 **Vocabulary cards from photos** — splits OCR tables into individual words/phrases, preserves compounds, and creates one translated example card per item
 - 🔊 **Language-aware text-to-speech** — `/read` reads Turkish or other languages aloud with voice/rate controls
 - 🤖 **Autoresearch loop** — AI agents experiment with different teaching strategies to improve scores
 - 📊 **Evaluation pipeline** — 4-metric scoring: accuracy, pedagogy, Turkish correctness, composite
@@ -67,7 +68,52 @@ The frontend calls `http://127.0.0.1:8000` by default. To use a different API UR
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, and browser text-to-speech controls.
+The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, structured vocabulary cards, and browser text-to-speech controls.
+
+## Deploy On Render
+
+This repo includes a Render Blueprint in `render.yaml` with two services:
+
+- `turkish-tutor-api`: FastAPI backend built from `Dockerfile.api`. Docker is used so image OCR has the required `tesseract-ocr`, English, and Turkish language packages.
+- `turkish-tutor-web`: Next.js frontend exported as a static site from `web/out`.
+
+Deploy steps:
+
+1. Commit and push this repo branch to GitHub.
+2. Open the Blueprint deeplink:
+   `https://dashboard.render.com/blueprint/new?repo=https://github.com/Techris93/turkish-tutor`
+3. Select the pushed branch, currently `experiment/agent-1`.
+4. Fill the required secret env var for `turkish-tutor-api`:
+   - `GEMINI_API_KEY`
+5. Apply the Blueprint and wait for both services to deploy.
+6. Open `https://turkish-tutor-web.onrender.com`.
+
+The frontend is configured with `NEXT_PUBLIC_API_URL=https://turkish-tutor-api.onrender.com`, and the API allows CORS from `https://turkish-tutor-web.onrender.com`. If you rename either service in Render, update those two values in `render.yaml`.
+
+Render CLI validation, if installed and authenticated:
+
+```bash
+render blueprints validate
+```
+
+### Image Vocabulary Workflow
+
+When an uploaded photo contains a Turkish word list or table, the backend now:
+
+- Cleans OCR text and removes labels such as `İSİMLER`, `FİİLLER`, and table headings.
+- Splits row-style OCR like `arkadaş çarşı inek mavi salon açmak` into individual vocabulary entries.
+- Preserves common multi-word items such as `anneler günü`, `çocuk odası`, `doğum günü`, `cevap vermek`, and `tekrar etmek`.
+- Infers a light category for each item: noun/unknown, verb, color/adjective, nationality, place/country, or phrase.
+- Asks Gemini for strict JSON vocabulary cards, then validates and repairs the response so every detected item is still displayed.
+
+Each vocabulary card includes the Turkish item, English translation, category, CEFR level, a level-appropriate Turkish example, the translated example, a short note, and text-to-speech text for both the word and the example.
+
+In the frontend, use:
+
+- Search to find a word, translation, or example.
+- Type filter to focus on verbs, colors, nationalities, places, or phrases.
+- Per-card play buttons to hear one word or one example.
+- `Words` and `Examples` playback buttons to queue all detected vocabulary.
 
 ---
 
@@ -110,6 +156,18 @@ Supported intake:
 
 Text-to-speech uses macOS `say` automatically on macOS, including installed Turkish voices. On other platforms, install `pyttsx3` for a basic local fallback. Use `/voices tr` to see whether a Turkish voice is installed.
 
+### Verification
+
+```bash
+source .venv/bin/activate
+python -m py_compile api.py tutor.py config.py dataset.py evaluate.py swarm.py content_intelligence.py speech.py vocabulary_cards.py
+python -m unittest discover -s tests
+
+cd web
+npm run lint
+npm run build
+```
+
 ---
 
 ## 🗂️ Project Structure
@@ -117,13 +175,16 @@ Text-to-speech uses macOS `say` automatically on macOS, including installed Turk
 ```
 turkish-tutor/
 ├── tutor.py        — Main interactive CLI tutor (Gemini-powered)
+├── api.py          — FastAPI backend for the web app
 ├── config.py       — Teaching strategies, CEFR levels, system prompt
 ├── content_intelligence.py — Text/PDF/DOCX/image extraction and CEFR study prompt helpers
+├── vocabulary_cards.py — Structured vocabulary-card JSON parsing and fallbacks
 ├── speech.py       — Language-aware TTS voice discovery and playback
 ├── dataset.py      — Knowledge base pipeline (vocabulary, grammar, Q&A)
 ├── evaluate.py     — 4-metric evaluator (used by autoresearch swarm)
 ├── swarm.py        — Multi-agent strategy optimizer
 ├── tests/          — Unit tests for extraction and speech helpers
+├── web/            — Next.js frontend
 ├── data/
 │   ├── knowledge.json    — Turkish language knowledge base
 │   ├── test_qa.json      — Test Q&A dataset (20 CEFR-leveled questions)

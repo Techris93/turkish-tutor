@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
@@ -25,6 +26,52 @@ COMMON_TURKISH_WORDS = {
     "ile", "için", "de", "da", "mi", "mı", "mu", "mü", "var", "yok",
     "merhaba", "teşekkür", "lütfen", "evet", "hayır", "türkçe",
 }
+VOCABULARY_HEADINGS = {
+    "isim", "isimler", "fiil", "fiiller", "sifat", "sıfat", "sıfatlar",
+    "renk", "renkler", "kelime", "kelimeler", "vocabulary", "nouns",
+    "verbs", "adjectives", "tr", "turkce", "türkçe",
+}
+KNOWN_MULTIWORD_ITEMS = {
+    "anneler günü",
+    "çocuk odası",
+    "doğum günü",
+    "cevap vermek",
+    "tekrar etmek",
+    "seyahat etmek",
+    "rica etmek",
+    "telefon etmek",
+    "yardım etmek",
+    "alışveriş yapmak",
+    "hoşça kal",
+    "güle güle",
+    "iyi günler",
+    "iyi akşamlar",
+    "iyi geceler",
+}
+COMPOUND_VERB_AUXILIARIES = {"etmek", "vermek", "olmak", "yapmak", "kalmak"}
+SAFE_OCR_CORRECTIONS = {
+    "aksam": "akşam",
+    "ingiliz": "İngiliz",
+    "ingiltere": "İngiltere",
+    "iran": "İran",
+    "italya": "İtalya",
+    "nigeria": "Nijerya",
+    "ginli": "Çinli",
+    "gin": "Çin",
+}
+COLORS = {
+    "beyaz", "siyah", "mavi", "kırmızı", "sarı", "yeşil", "turuncu",
+    "mor", "pembe", "kahverengi", "gri",
+}
+COUNTRIES_AND_PLACES = {
+    "afrika", "asya", "avrupa", "amerika", "almanya", "arnavutluk",
+    "çin", "ingiltere", "iran", "ispanya", "mısır", "nijerya",
+    "somali", "suriye", "japonya", "italya",
+}
+NATIONALITIES = {
+    "alman", "arap", "arnavut", "ingiliz", "iranlı", "ispanyol",
+    "mısırlı", "çinli", "japon", "somalili", "suriyeli",
+}
 
 
 class ExtractionError(RuntimeError):
@@ -36,6 +83,12 @@ class TextUnit:
     text: str
     kind: str
     turkish_signal: bool
+
+
+@dataclass(frozen=True)
+class VocabularyItem:
+    text: str
+    item_type: str
 
 
 @dataclass(frozen=True)
@@ -58,6 +111,126 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def normalize_vocab_item(text: str) -> str:
+    """Clean a single OCR vocabulary item without over-correcting content."""
+    text = re.sub(r"[^\wÇĞİÖŞÜçğıöşü' -]+", "", text, flags=re.UNICODE)
+    text = re.sub(r"\s+", " ", text).strip(" -_")
+    if not text:
+        return ""
+
+    words = []
+    for word in text.split():
+        lower = word.lower()
+        words.append(SAFE_OCR_CORRECTIONS.get(lower, word))
+    return " ".join(words)
+
+
+def vocabulary_key(text: str) -> str:
+    """Casefold key that handles Turkish dotted capital I from OCR headings."""
+    key = unicodedata.normalize("NFKD", text.casefold())
+    key = "".join(ch for ch in key if not unicodedata.combining(ch))
+    return key
+
+
+def _tokenize_vocab_line(line: str) -> List[str]:
+    line = re.sub(r"[|•·,;:()\[\]{}]", " ", line)
+    raw_tokens = re.findall(r"[A-Za-zÇĞİÖŞÜçğıöşü']+", line)
+    tokens = []
+    for token in raw_tokens:
+        cleaned = normalize_vocab_item(token)
+        if not cleaned:
+            continue
+        if vocabulary_key(cleaned) in VOCABULARY_HEADINGS:
+            continue
+        tokens.append(cleaned)
+    return tokens
+
+
+def infer_vocab_type(item: str) -> str:
+    """Infer a lightweight vocabulary category for display/filtering."""
+    lower = vocabulary_key(item)
+    words = lower.split()
+    color_keys = {vocabulary_key(value) for value in COLORS}
+    place_keys = {vocabulary_key(value) for value in COUNTRIES_AND_PLACES}
+    nationality_keys = {vocabulary_key(value) for value in NATIONALITIES}
+    multiword_keys = {vocabulary_key(value) for value in KNOWN_MULTIWORD_ITEMS}
+    if lower in color_keys:
+        return "adjective/color"
+    if lower in place_keys:
+        return "place/country"
+    if lower in nationality_keys:
+        return "nationality"
+    if lower in multiword_keys:
+        if words[-1:] and words[-1] in COMPOUND_VERB_AUXILIARIES:
+            return "verb"
+        return "phrase"
+    if words and words[-1] in COMPOUND_VERB_AUXILIARIES:
+        return "verb"
+    if lower.endswith(("mak", "mek")):
+        return "verb"
+    if len(words) > 1:
+        return "phrase"
+    return "unknown"
+
+
+def extract_vocabulary_items(text: str, max_items: int = 240) -> List[VocabularyItem]:
+    """Extract individual vocabulary entries from OCR tables and word lists.
+
+    This intentionally differs from sentence segmentation: it treats lines like
+    "arkadaş çarşı inek mavi salon açmak" as separate vocabulary cells while
+    preserving known compounds such as "doğum günü" and "cevap vermek".
+    """
+    clean = normalize_text(text)
+    if not clean:
+        return []
+
+    items: List[VocabularyItem] = []
+    seen = set()
+    multiword_keys = {vocabulary_key(value) for value in KNOWN_MULTIWORD_ITEMS}
+
+    for line in clean.splitlines():
+        tokens = _tokenize_vocab_line(line)
+        index = 0
+        while index < len(tokens):
+            chosen = ""
+            for size in (3, 2):
+                phrase = " ".join(tokens[index:index + size])
+                if vocabulary_key(phrase) in multiword_keys:
+                    chosen = phrase
+                    index += size
+                    break
+
+            if not chosen:
+                if (
+                    index + 1 < len(tokens)
+                    and vocabulary_key(tokens[index + 1]) in COMPOUND_VERB_AUXILIARIES
+                    and not vocabulary_key(tokens[index]).endswith(("mak", "mek"))
+                ):
+                    chosen = f"{tokens[index]} {tokens[index + 1]}"
+                    index += 2
+                else:
+                    chosen = tokens[index]
+                    index += 1
+
+            chosen = normalize_vocab_item(chosen)
+            key = vocabulary_key(chosen)
+            if not chosen or key in VOCABULARY_HEADINGS or key in seen:
+                continue
+            seen.add(key)
+            items.append(VocabularyItem(chosen, infer_vocab_type(chosen)))
+            if len(items) >= max_items:
+                return items
+
+    if len(items) <= 1:
+        for segment in segment_text(clean, max_units=max_items):
+            item = normalize_vocab_item(segment)
+            if item and len(item.split()) <= 4 and item.casefold() not in seen:
+                seen.add(item.casefold())
+                items.append(VocabularyItem(item, infer_vocab_type(item)))
+
+    return items[:max_items]
 
 
 def detect_language(text: str) -> str:
@@ -319,4 +492,3 @@ Return a polished study note with these sections:
 5. Listen practice: provide 3 short lines that are ideal for text-to-speech practice.
 
 Be direct for translation tasks. Do not hide the answer behind Socratic questions."""
-

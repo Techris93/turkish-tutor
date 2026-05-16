@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BookOpen,
   FileText,
   Headphones,
   Loader2,
@@ -10,40 +11,24 @@ import {
   Search,
   Send,
   Square,
+  Trash2,
   Upload
 } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-
-type StudyUnit = {
-  text: string;
-  kind: string;
-  turkish_signal: boolean;
-};
-
-type StudyResponse = {
-  source_type: string;
-  source_label: string;
-  inferred_level: string;
-  study_level: string;
-  target_language: string;
-  preview: string;
-  units: StudyUnit[];
-  vocabulary_cards: VocabularyCard[];
-  vocabulary_warning: string;
-  note: string;
-};
-
-type VocabularyCard = {
-  turkish: string;
-  item_type: string;
-  translation: string;
-  cefr_level: string;
-  example_tr: string;
-  example_translation: string;
-  learner_note: string;
-  tts_word: string;
-  tts_sentence: string;
-};
+import {
+  PlaybackMode,
+  SAVED_LESSONS_KEY,
+  SavedLesson,
+  SpeechSegment,
+  StudyResponse,
+  createSavedLesson,
+  deserializeLessons,
+  exampleSegments,
+  formatPair,
+  serializeLessons,
+  upsertLesson,
+  wordSegments
+} from "../lib/learning";
 
 type HealthResponse = {
   ok: boolean;
@@ -73,6 +58,12 @@ export default function Home() {
   const [paused, setPaused] = useState(false);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("bilingual");
+  const [savedLessons, setSavedLessons] = useState<SavedLesson[]>([]);
+  const [lessonsLoaded, setLessonsLoaded] = useState(false);
+  const [lessonTitle, setLessonTitle] = useState("");
+  const [lessonSearch, setLessonSearch] = useState("");
+  const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +105,18 @@ export default function Home() {
       window.clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    setSavedLessons(deserializeLessons(window.localStorage.getItem(SAVED_LESSONS_KEY)));
+    setLessonsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!lessonsLoaded) {
+      return;
+    }
+    window.localStorage.setItem(SAVED_LESSONS_KEY, serializeLessons(savedLessons));
+  }, [lessonsLoaded, savedLessons]);
 
   useEffect(() => {
     if (!("speechSynthesis" in window)) {
@@ -195,6 +198,8 @@ export default function Home() {
       }
       setResult(payload);
       setLevel(payload.study_level);
+      setActiveLessonId(null);
+      setLessonTitle(defaultLessonTitle(payload));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Study request failed.");
     } finally {
@@ -206,23 +211,33 @@ export default function Home() {
     setFile(event.target.files?.[0] ?? null);
   }
 
-  function selectVoice() {
+  function defaultLessonTitle(study: StudyResponse) {
+    const source = study.source_label && study.source_label !== "direct input" ? study.source_label : "Turkish lesson";
+    return `${source} · ${study.study_level}`;
+  }
+
+  function selectVoiceForLanguage(lang: string) {
+    const normalized = lang.toLowerCase().split("-")[0];
+    const explicitVoice = voices.find((item) => item.name === selectedVoice);
+    if (explicitVoice && explicitVoice.lang.toLowerCase().startsWith(normalized)) {
+      return explicitVoice;
+    }
     return (
-      voices.find((item) => item.name === selectedVoice) ??
+      voices.find((item) => item.lang.toLowerCase() === lang.toLowerCase()) ??
+      voices.find((item) => item.lang.toLowerCase().startsWith(normalized)) ??
+      explicitVoice ??
       turkishVoices[0] ??
-      voices.find((item) => item.lang.toLowerCase().startsWith("tr")) ??
-      voices.find((item) => item.lang.toLowerCase().startsWith("en"))
+      voices[0]
     );
   }
 
-  function speakTexts(texts: string[]) {
-    const queue = texts.map((item) => item.trim()).filter(Boolean);
+  function speakSegments(segments: SpeechSegment[]) {
+    const queue = segments.filter((segment) => segment.text.trim());
     if (!("speechSynthesis" in window) || queue.length === 0) {
       return;
     }
     window.speechSynthesis.cancel();
 
-    const voice = selectVoice();
     let index = 0;
 
     const playNext = () => {
@@ -231,9 +246,11 @@ export default function Home() {
         setPaused(false);
         return;
       }
-      const utterance = new SpeechSynthesisUtterance(queue[index]);
-      utterance.lang = "tr-TR";
+      const segment = queue[index];
+      const utterance = new SpeechSynthesisUtterance(segment.text);
+      utterance.lang = segment.lang;
       utterance.rate = speechRate;
+      const voice = selectVoiceForLanguage(segment.lang);
       if (voice) {
         utterance.voice = voice;
         utterance.lang = voice.lang;
@@ -254,8 +271,67 @@ export default function Home() {
     playNext();
   }
 
+  function speakTexts(texts: string[]) {
+    speakSegments(texts.map((item) => ({ text: item, lang: "tr-TR" })));
+  }
+
   function speak() {
     speakTexts([readableText]);
+  }
+
+  function saveLesson() {
+    if (!result) {
+      return;
+    }
+    const baseLesson =
+      activeLessonId && savedLessons.find((lesson) => lesson.id === activeLessonId)
+        ? { ...savedLessons.find((lesson) => lesson.id === activeLessonId)!, result }
+        : createSavedLesson(result, lessonTitle || undefined);
+    const lesson = {
+      ...baseLesson,
+      title: (lessonTitle || baseLesson.title).trim(),
+      result
+    };
+    setSavedLessons((current) => upsertLesson(current, lesson));
+    setActiveLessonId(lesson.id);
+    setLessonTitle(lesson.title);
+  }
+
+  function openLesson(lesson: SavedLesson) {
+    stopSpeech();
+    setResult(lesson.result);
+    setLevel(lesson.result.study_level);
+    setTargetLanguage(lesson.result.target_language);
+    setSearch("");
+    setTypeFilter("all");
+    setActiveLessonId(lesson.id);
+    setLessonTitle(lesson.title);
+    setError("");
+  }
+
+  function renameLesson(lesson: SavedLesson, title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      return;
+    }
+    setSavedLessons((current) =>
+      current.map((item) =>
+        item.id === lesson.id ? { ...item, title: trimmed, updated_at: new Date().toISOString() } : item
+      )
+    );
+    if (activeLessonId === lesson.id) {
+      setLessonTitle(trimmed);
+    }
+  }
+
+  function deleteLesson(lesson: SavedLesson) {
+    if (!window.confirm(`Delete saved lesson "${lesson.title}"?`)) {
+      return;
+    }
+    setSavedLessons((current) => current.filter((item) => item.id !== lesson.id));
+    if (activeLessonId === lesson.id) {
+      setActiveLessonId(null);
+    }
   }
 
   function pauseOrResume() {
@@ -279,6 +355,29 @@ export default function Home() {
     setSpeaking(false);
     setPaused(false);
   }
+
+  const filteredLessons = useMemo(() => {
+    const query = lessonSearch.trim().toLowerCase();
+    if (!query) {
+      return savedLessons;
+    }
+    return savedLessons.filter((lesson) =>
+      [
+        lesson.title,
+        lesson.result.source_label,
+        lesson.result.preview,
+        lesson.result.target_language,
+        lesson.result.study_level
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [savedLessons, lessonSearch]);
+
+  const activeLesson = activeLessonId
+    ? savedLessons.find((lesson) => lesson.id === activeLessonId)
+    : null;
 
   return (
     <main className="shell">
@@ -369,6 +468,83 @@ export default function Home() {
           <section className="panel">
             <div className="panel-header">
               <div className="panel-title">
+                <BookOpen size={18} />
+                <h2>Saved Lessons</h2>
+              </div>
+              <strong>{savedLessons.length}</strong>
+            </div>
+            <div className="panel-body">
+              <div className="lesson-save-row">
+                <input
+                  aria-label="Lesson title"
+                  disabled={!result}
+                  placeholder="Lesson title"
+                  type="text"
+                  value={lessonTitle}
+                  onChange={(event) => setLessonTitle(event.target.value)}
+                />
+                <button className="ghost-button" disabled={!result} type="button" onClick={saveLesson}>
+                  {activeLessonId ? "Update" : "Save"}
+                </button>
+              </div>
+              <div className="search-box lesson-search">
+                <Search size={16} />
+                <input
+                  aria-label="Search saved lessons"
+                  placeholder="Search saved lessons"
+                  value={lessonSearch}
+                  onChange={(event) => setLessonSearch(event.target.value)}
+                />
+              </div>
+              {filteredLessons.length ? (
+                <div className="lesson-list">
+                  {filteredLessons.map((lesson) => (
+                    <article
+                      className={`lesson-card ${lesson.id === activeLessonId ? "active" : ""}`}
+                      key={lesson.id}
+                    >
+                      <button className="lesson-open" type="button" onClick={() => openLesson(lesson)}>
+                        <strong>{lesson.title}</strong>
+                        <span>
+                          {lesson.result.study_level} · {lesson.result.target_language} ·{" "}
+                          {new Date(lesson.created_at).toLocaleDateString()}
+                        </span>
+                      </button>
+                      <div className="lesson-actions">
+                        <button
+                          className="icon-button"
+                          type="button"
+                          aria-label={`Rename ${lesson.title}`}
+                          onClick={() => {
+                            const title = window.prompt("Rename lesson", lesson.title);
+                            if (title !== null) {
+                              renameLesson(lesson, title);
+                            }
+                          }}
+                        >
+                          <RefreshCw size={16} />
+                        </button>
+                        <button
+                          className="icon-button"
+                          type="button"
+                          aria-label={`Delete ${lesson.title}`}
+                          onClick={() => deleteLesson(lesson)}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted-copy">Saved lessons stay in this browser for later revision.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
                 <Headphones size={18} />
                 <h2>Read Aloud</h2>
               </div>
@@ -388,6 +564,18 @@ export default function Home() {
                         {voice.name} · {voice.lang}
                       </option>
                     ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="playback-mode">Playback</label>
+                  <select
+                    id="playback-mode"
+                    value={playbackMode}
+                    onChange={(event) => setPlaybackMode(event.target.value as PlaybackMode)}
+                  >
+                    <option value="bilingual">Turkish + translation</option>
+                    <option value="turkish">Turkish only</option>
+                    <option value="translation">Translation only</option>
                   </select>
                 </div>
                 <div className="field">
@@ -416,7 +604,11 @@ export default function Home() {
                   disabled={!result?.vocabulary_cards.length}
                   type="button"
                   onClick={() =>
-                    speakTexts((result?.vocabulary_cards ?? []).map((card) => card.tts_word))
+                    speakSegments(
+                      (result?.vocabulary_cards ?? []).flatMap((card) =>
+                        wordSegments(card, result?.target_language ?? targetLanguage, playbackMode)
+                      )
+                    )
                   }
                 >
                   <Play size={18} />
@@ -427,7 +619,11 @@ export default function Home() {
                   disabled={!result?.vocabulary_cards.length}
                   type="button"
                   onClick={() =>
-                    speakTexts((result?.vocabulary_cards ?? []).map((card) => card.tts_sentence))
+                    speakSegments(
+                      (result?.vocabulary_cards ?? []).flatMap((card) =>
+                        exampleSegments(card, result?.target_language ?? targetLanguage, playbackMode)
+                      )
+                    )
                   }
                 >
                   <Play size={18} />
@@ -473,10 +669,15 @@ export default function Home() {
                 <div className="panel-header">
                   <div className="panel-title">
                     <FileText size={18} />
-                    <h2>Extracted</h2>
+                    <h2>{activeLesson ? "Saved Lesson" : "Extracted"}</h2>
                   </div>
                 </div>
                 <div className="panel-body">
+                  {activeLesson ? (
+                    <div className="revision-banner">
+                      Revising saved lesson: <strong>{activeLesson.title}</strong>
+                    </div>
+                  ) : null}
                   <div className="meta-grid">
                     <div className="meta-item">
                       <span>Source</span>
@@ -550,7 +751,10 @@ export default function Home() {
                               aria-label={`Play ${card.turkish}`}
                               className="icon-button"
                               type="button"
-                              onClick={() => speakTexts([card.tts_word])}
+                              title={formatPair(card.turkish, card.translation)}
+                              onClick={() =>
+                                speakSegments(wordSegments(card, result.target_language, playbackMode))
+                              }
                             >
                               <Play size={16} />
                             </button>
@@ -558,7 +762,10 @@ export default function Home() {
                               aria-label={`Play example for ${card.turkish}`}
                               className="icon-button"
                               type="button"
-                              onClick={() => speakTexts([card.tts_sentence])}
+                              title={formatPair(card.example_tr, card.example_translation)}
+                              onClick={() =>
+                                speakSegments(exampleSegments(card, result.target_language, playbackMode))
+                              }
                             >
                               <Headphones size={16} />
                             </button>

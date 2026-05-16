@@ -176,7 +176,8 @@ button:disabled {
 
 textarea,
 select,
-input[type="file"] {
+input[type="file"],
+input[type="text"] {
   width: 100%;
   border: 1px solid var(--line);
   background: var(--surface-strong);
@@ -194,7 +195,8 @@ textarea {
 
 textarea:focus,
 select:focus,
-input[type="file"]:focus {
+input[type="file"]:focus,
+input[type="text"]:focus {
   border-color: var(--green);
   box-shadow: 0 0 0 3px rgba(23, 107, 91, 0.14);
 }
@@ -317,6 +319,22 @@ input[type="file"]:focus {
   margin: 12px 0 0;
 }
 
+.muted-copy {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.revision-banner {
+  border: 1px solid rgba(23, 107, 91, 0.24);
+  background: rgba(23, 107, 91, 0.08);
+  color: var(--green-strong);
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  line-height: 1.35;
+}
+
 .meta-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -356,6 +374,69 @@ input[type="file"]:focus {
   grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
   gap: 10px;
   margin-bottom: 14px;
+}
+
+.lesson-save-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.lesson-search {
+  margin-bottom: 12px;
+}
+
+.lesson-list {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.lesson-card {
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+}
+
+.lesson-card.active {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(23, 107, 91, 0.1);
+}
+
+.lesson-open {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lesson-open strong,
+.lesson-open span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lesson-open span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.lesson-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .search-box {
@@ -498,7 +579,7 @@ input[type="file"]:focus {
 
 .tts-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(130px, 0.7fr);
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.8fr) minmax(130px, 0.6fr);
   gap: 12px;
   align-items: end;
 }
@@ -551,13 +632,24 @@ input[type="range"] {
 
   .meta-grid,
   .tts-grid,
-  .filters {
+  .filters,
+  .lesson-save-row,
+  .lesson-card {
     grid-template-columns: 1fr;
   }
 
   .vocab-main,
-  .card-foot {
+  .card-foot,
+  .lesson-actions {
     flex-direction: column;
+  }
+
+  .lesson-actions {
+    align-items: stretch;
+  }
+
+  .lesson-actions .icon-button {
+    width: 100%;
   }
 
   .brand p {

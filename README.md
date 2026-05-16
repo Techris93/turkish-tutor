@@ -16,7 +16,8 @@ An adaptive AI language tutor for Turkish, powered by Google Gemini. Uses the **
 - 🖼️ **Image/PDF/text study intake** — `/study` extracts Turkish from typed text, images, PDFs, DOCX, and text files
 - 🌍 **Translation + CEFR examples** — translates extracted words/phrases/sentences and generates A1-C2 practice lines
 - 🧾 **Vocabulary cards from photos** — splits OCR tables into individual words/phrases, preserves compounds, and creates one translated example card per item
-- 🔊 **Language-aware text-to-speech** — `/read` reads Turkish or other languages aloud with voice/rate controls
+- 🔊 **Bilingual text-to-speech** — reads Turkish words/examples alone, translations alone, or Turkish followed by the translation
+- 💾 **Saved web lessons** — saves generated study sessions locally so learners can revisit and revise them later
 - 🤖 **Autoresearch loop** — AI agents experiment with different teaching strategies to improve scores
 - 📊 **Evaluation pipeline** — 4-metric scoring: accuracy, pedagogy, Turkish correctness, composite
 
@@ -68,7 +69,7 @@ The frontend calls `http://127.0.0.1:8000` by default. To use a different API UR
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, structured vocabulary cards, and browser text-to-speech controls.
+The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, structured vocabulary cards, browser text-to-speech controls, and saved lessons.
 
 ## Deploy On Render
 
@@ -82,7 +83,7 @@ Deploy steps:
 1. Commit and push this repo branch to GitHub.
 2. Open the Blueprint deeplink:
    `https://dashboard.render.com/blueprint/new?repo=https://github.com/Techris93/turkish-tutor`
-3. Select the pushed branch, currently `experiment/agent-1`.
+3. Select the pushed branch, usually `main`.
 4. Fill the required secret env var for `turkish-tutor-api`:
    - `GEMINI_API_KEY`
 5. Apply the Blueprint and wait for both services to deploy.
@@ -112,8 +113,24 @@ In the frontend, use:
 
 - Search to find a word, translation, or example.
 - Type filter to focus on verbs, colors, nationalities, places, or phrases.
-- Per-card play buttons to hear one word or one example.
-- `Words` and `Examples` playback buttons to queue all detected vocabulary.
+- The playback mode menu to choose `Turkish + translation`, `Turkish only`, or `Translation only`.
+- Per-card play buttons to hear one word or one example. In bilingual mode, word playback is spoken as pairs such as `gel, come`; example playback is spoken as pairs such as `buraya gel, come here`.
+- `Words` and `Examples` playback buttons to queue all detected vocabulary with the selected playback mode.
+
+Browser text-to-speech uses `SpeechSynthesis`. The app tries to use a Turkish voice for Turkish segments and a target-language voice for translations. Available voices vary by browser and operating system, so install system voices if pronunciation quality is limited.
+
+### Saved Lessons
+
+The web app can save the current study result as a lesson:
+
+- Enter or edit a lesson title in the `Saved Lessons` panel.
+- Click `Save` to store the current extracted text, study note, CEFR level, target language, source details, and vocabulary cards.
+- Use the saved lesson list to reopen a lesson without uploading the image again or calling Gemini again.
+- Rename or delete saved lessons from the lesson list. Delete asks for confirmation first.
+
+Saved lessons are stored in the browser's `localStorage` under `turkce-hoca.saved-lessons.v1`. They survive refreshes and browser restarts on the same device/browser, but they are not synced across devices and will be removed if site data is cleared.
+
+After pushing changes to the branch connected to Render, Render should redeploy the API/static web services automatically from the Blueprint.
 
 ---
 

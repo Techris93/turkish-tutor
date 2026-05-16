@@ -16,7 +16,6 @@ services:
   - type: web
     name: turkish-tutor-web
     runtime: static
-    plan: free
     branch: main
     rootDir: web
     buildCommand: npm ci && npm run build

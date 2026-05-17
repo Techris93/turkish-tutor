@@ -18,7 +18,7 @@ An adaptive AI language tutor for Turkish, powered by Google Gemini. Uses the **
 - 🧾 **Vocabulary cards from photos** — splits OCR tables into individual words/phrases, preserves compounds, and creates one translated example card per item
 - 🔊 **Bilingual text-to-speech** — reads Turkish words/examples alone, translations alone, or Turkish followed by the translation
 - 💾 **Account saved lessons** — saves generated study sessions to a user account so learners can revisit and revise them later
-- 🔐 **Email/password authentication** — sign up, log in, log out, and use a password-reset-ready flow
+- 🔐 **Production auth basics** — email/password auth, SMTP password reset, Google/GitHub OAuth, and rate limiting
 - 🤖 **Autoresearch loop** — AI agents experiment with different teaching strategies to improve scores
 - 📊 **Evaluation pipeline** — 4-metric scoring: accuracy, pedagogy, Turkish correctness, composite
 
@@ -84,13 +84,27 @@ AUTH_COOKIE_SAMESITE=lax
 
 The API creates the required tables at startup. User passwords are hashed with Argon2. Browser sessions use HTTP-only cookies, so the frontend must call the API with credentials enabled.
 
-For a local password-reset test, set:
+For a local password-reset test without sending email, set:
 
 ```bash
 PASSWORD_RESET_RETURN_TOKEN=true
 ```
 
-This returns the reset token in the API response for development only. In production, configure an email provider such as `SMTP_HOST` or `RESEND_API_KEY` before exposing password reset to real users.
+This returns the reset token in the API response for development only.
+
+To send real reset emails locally or in production, configure SMTP:
+
+```bash
+PASSWORD_RESET_BASE_URL=http://localhost:3000
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=your_smtp_user
+SMTP_PASSWORD=your_smtp_password
+SMTP_FROM_EMAIL=noreply@example.com
+SMTP_USE_TLS=true
+```
+
+Reset links open the web app with a `reset_token` query parameter. The app shows the new-password form automatically when that token is present.
 
 ## Deploy On Render
 
@@ -113,7 +127,17 @@ Deploy steps:
 
 The frontend is configured with `NEXT_PUBLIC_API_URL=https://turkish-tutor-api.onrender.com`, and the API allows CORS from `https://turkish-tutor-web.onrender.com`. The API receives `DATABASE_URL` from the Blueprint-managed Postgres database, and production cookies use `AUTH_COOKIE_SECURE=true` plus `AUTH_COOKIE_SAMESITE=none`. If you rename services in Render, update those values in `render.yaml`.
 
-Render syncs `sync: false` secrets only during initial Blueprint creation. If you add OAuth or email-provider secrets later, set them manually in the Render Dashboard.
+Render syncs `sync: false` secrets only during initial Blueprint creation. Set or update these secrets manually in the Render Dashboard as needed:
+
+- `GEMINI_API_KEY`
+- `SMTP_HOST`
+- `SMTP_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_FROM_EMAIL`
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `GITHUB_OAUTH_CLIENT_ID`
+- `GITHUB_OAUTH_CLIENT_SECRET`
 
 Render CLI validation, if installed and authenticated:
 
@@ -164,25 +188,55 @@ The web app includes:
 - Logout with server-side session invalidation.
 - Current-user check on app load.
 - HTTP-only cookie sessions stored in the database.
-- Password reset request/confirm endpoints and UI.
-- OAuth-ready provider configuration endpoint for Google and GitHub.
+- SMTP-backed password reset request/confirm endpoints and UI.
+- Google and GitHub OAuth start/callback routes with database-backed state validation.
+- In-process rate limiting for high-risk endpoints.
 
-OAuth buttons remain disabled until the matching environment variables are configured:
+OAuth buttons remain disabled until the matching credentials and redirect URIs are configured:
 
 ```bash
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
+GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/api/auth/oauth/google/callback
 GITHUB_OAUTH_CLIENT_ID=
 GITHUB_OAUTH_CLIENT_SECRET=
+GITHUB_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/api/auth/oauth/github/callback
+OAUTH_SUCCESS_REDIRECT_URL=http://localhost:3000/?oauth=success
+OAUTH_ERROR_REDIRECT_URL=http://localhost:3000/?oauth=error
 ```
 
-The password reset flow creates secure reset tokens, but it does not pretend to send email unless an email provider is configured. For development only, `PASSWORD_RESET_RETURN_TOKEN=true` returns the token in the response.
+For Render, use:
 
-Current production limitations:
+```bash
+GOOGLE_OAUTH_REDIRECT_URI=https://turkish-tutor-api.onrender.com/api/auth/oauth/google/callback
+GITHUB_OAUTH_REDIRECT_URI=https://turkish-tutor-api.onrender.com/api/auth/oauth/github/callback
+OAUTH_SUCCESS_REDIRECT_URL=https://turkish-tutor-web.onrender.com/?oauth=success
+OAUTH_ERROR_REDIRECT_URL=https://turkish-tutor-web.onrender.com/?oauth=error
+```
 
-- OAuth has provider configuration plumbing, but provider callback/login routes still need to be implemented before OAuth sign-in is enabled.
-- Password reset email delivery is a provider-ready stub until SMTP or an email API is wired in.
-- API-level rate limiting is not yet implemented; add it before opening sign-up widely to the public.
+OAuth links accounts by verified/provider email. If the email already exists, the OAuth login uses the existing account; otherwise it creates a new account.
+
+### Rate Limiting
+
+The API includes a lightweight in-process limiter. Defaults can be overridden with:
+
+```bash
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_SIGNUP=5/1h
+RATE_LIMIT_LOGIN=10/5m
+RATE_LIMIT_PASSWORD_RESET=5/1h
+RATE_LIMIT_PASSWORD_RESET_CONFIRM=10/1h
+RATE_LIMIT_STUDY=30/1h
+RATE_LIMIT_LESSON_WRITE=120/1h
+```
+
+The limiter is intentionally simple for this small app and protects sign-up, login, password reset, OAuth, lesson writes, and Gemini-backed study requests. If you run multiple API instances or open this app to broader public traffic, replace it with Redis or another shared rate limiter.
+
+Current production setup still required:
+
+- Add real SMTP credentials before password reset emails can be delivered.
+- Add Google/GitHub OAuth app credentials and exact redirect URLs before OAuth buttons become active.
+- Keep `PASSWORD_RESET_RETURN_TOKEN=false` outside local development.
 
 After pushing changes to the branch connected to Render, Render should redeploy the API/static web services automatically from the Blueprint.
 
@@ -231,7 +285,7 @@ Text-to-speech uses macOS `say` automatically on macOS, including installed Turk
 
 ```bash
 source .venv/bin/activate
-python -m py_compile api.py auth_storage.py tutor.py config.py dataset.py evaluate.py swarm.py content_intelligence.py speech.py vocabulary_cards.py
+python -m py_compile api.py auth_storage.py email_delivery.py oauth_flow.py rate_limit.py tutor.py config.py dataset.py evaluate.py swarm.py content_intelligence.py speech.py vocabulary_cards.py
 python -m unittest discover -s tests
 
 cd web
@@ -249,6 +303,9 @@ turkish-tutor/
 ├── tutor.py        — Main interactive CLI tutor (Gemini-powered)
 ├── api.py          — FastAPI backend for the web app
 ├── auth_storage.py — SQLAlchemy auth, sessions, password reset tokens, and saved lessons
+├── email_delivery.py — SMTP password reset email delivery
+├── oauth_flow.py   — Google/GitHub OAuth provider exchange helpers
+├── rate_limit.py   — Small in-process API rate limiter
 ├── config.py       — Teaching strategies, CEFR levels, system prompt
 ├── content_intelligence.py — Text/PDF/DOCX/image extraction and CEFR study prompt helpers
 ├── vocabulary_cards.py — Structured vocabulary-card JSON parsing and fallbacks

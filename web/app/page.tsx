@@ -160,6 +160,20 @@ export default function Home() {
     setLocalLessons(local);
     setSavedLessons(local);
     setLessonsLoaded(true);
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("reset_token");
+    const oauth = params.get("oauth");
+    if (token) {
+      setResetToken(token);
+      setAuthMode("reset");
+      setAuthMessage("Choose a new password to finish resetting your account.");
+    } else if (oauth === "success") {
+      setAuthMessage("OAuth login completed.");
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (oauth === "error") {
+      setAuthError("OAuth login could not be completed. Please try again or use email login.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
 
   useEffect(() => {
@@ -402,6 +416,7 @@ export default function Home() {
           setResetToken("");
           setAuthPassword("");
           setAuthMode("login");
+          window.history.replaceState({}, "", window.location.pathname);
         } else {
           const payload = await apiJson<{ message: string; reset_token?: string | null }>(
             "/api/auth/password-reset/request",
@@ -477,6 +492,13 @@ export default function Home() {
     } finally {
       setLessonsLoading(false);
     }
+  }
+
+  function startOAuth(provider: OAuthProvider) {
+    if (!provider.authorization_url) {
+      return;
+    }
+    window.location.href = provider.authorization_url;
   }
 
   async function saveLesson() {
@@ -821,6 +843,7 @@ export default function Home() {
                       disabled={!provider.authorization_url}
                       key={provider.provider}
                       type="button"
+                      onClick={() => startOAuth(provider)}
                       title={
                         provider.authorization_url
                           ? `Continue with ${provider.provider}.`

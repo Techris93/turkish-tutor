@@ -2,11 +2,25 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import timedelta
+from unittest.mock import AsyncMock, patch
+from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
 import api
-from auth_storage import configure_database, drop_db, init_db
+from auth_storage import (
+    PasswordResetToken,
+    configure_database,
+    create_oauth_state,
+    drop_db,
+    hash_token,
+    init_db,
+    session_factory,
+    utcnow,
+)
+from oauth_flow import OAuthProfile
+from rate_limit import limiter
 
 
 def study_result() -> dict:
@@ -44,12 +58,27 @@ class AuthLessonTests(unittest.TestCase):
         configure_database(self.database_url)
         drop_db()
         init_db()
+        limiter.clear()
+        os.environ["RATE_LIMIT_ENABLED"] = "false"
         os.environ["PASSWORD_RESET_RETURN_TOKEN"] = "true"
         self.client = TestClient(api.app)
 
     def tearDown(self):
-        os.environ.pop("PASSWORD_RESET_RETURN_TOKEN", None)
-        os.environ.pop("DATABASE_URL", None)
+        for key in [
+            "PASSWORD_RESET_RETURN_TOKEN",
+            "DATABASE_URL",
+            "RATE_LIMIT_ENABLED",
+            "RATE_LIMIT_LOGIN",
+            "SMTP_HOST",
+            "SMTP_FROM_EMAIL",
+            "GOOGLE_OAUTH_CLIENT_ID",
+            "GOOGLE_OAUTH_CLIENT_SECRET",
+            "GOOGLE_OAUTH_REDIRECT_URI",
+            "OAUTH_SUCCESS_REDIRECT_URL",
+            "OAUTH_ERROR_REDIRECT_URL",
+        ]:
+            os.environ.pop(key, None)
+        limiter.clear()
         self.tmpdir.cleanup()
 
     def signup(self, email: str = "learner@example.com") -> TestClient:
@@ -94,8 +123,9 @@ class AuthLessonTests(unittest.TestCase):
         self.assertEqual(login_client.get("/api/auth/me").status_code, 200)
 
     def test_password_reset_token_updates_password(self):
-        self.signup()
-        request = self.client.post(
+        signed_in = self.signup()
+        self.assertEqual(signed_in.get("/api/auth/me").status_code, 200)
+        request = signed_in.post(
             "/api/auth/password-reset/request",
             json={"email": "learner@example.com"},
         )
@@ -103,11 +133,12 @@ class AuthLessonTests(unittest.TestCase):
         token = request.json()["reset_token"]
         self.assertTrue(token)
 
-        confirm = self.client.post(
+        confirm = signed_in.post(
             "/api/auth/password-reset/confirm",
             json={"token": token, "password": "newpassword123"},
         )
         self.assertEqual(confirm.status_code, 200)
+        self.assertEqual(signed_in.get("/api/auth/me").status_code, 401)
 
         old_login = TestClient(api.app).post(
             "/api/auth/login",
@@ -121,6 +152,139 @@ class AuthLessonTests(unittest.TestCase):
             json={"email": "learner@example.com", "password": "newpassword123"},
         )
         self.assertEqual(new_login.status_code, 200)
+
+    def test_password_reset_email_send_path_and_missing_provider(self):
+        self.signup()
+        os.environ["PASSWORD_RESET_RETURN_TOKEN"] = "false"
+        os.environ.pop("SMTP_HOST", None)
+        missing = self.client.post(
+            "/api/auth/password-reset/request",
+            json={"email": "learner@example.com"},
+        )
+        self.assertEqual(missing.status_code, 200)
+        self.assertFalse(missing.json()["email_delivery_configured"])
+        self.assertIsNone(missing.json()["reset_token"])
+
+        os.environ["SMTP_HOST"] = "smtp.example.com"
+        os.environ["SMTP_FROM_EMAIL"] = "noreply@example.com"
+        with patch.object(api, "send_password_reset_email") as send_mock:
+            response = self.client.post(
+                "/api/auth/password-reset/request",
+                json={"email": "learner@example.com"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["email_delivery_configured"])
+        send_mock.assert_called_once()
+
+    def test_password_reset_token_is_single_use_and_expires(self):
+        self.signup()
+        request = self.client.post(
+            "/api/auth/password-reset/request",
+            json={"email": "learner@example.com"},
+        )
+        token = request.json()["reset_token"]
+        first = self.client.post(
+            "/api/auth/password-reset/confirm",
+            json={"token": token, "password": "newpassword123"},
+        )
+        self.assertEqual(first.status_code, 200)
+        second = self.client.post(
+            "/api/auth/password-reset/confirm",
+            json={"token": token, "password": "anotherpassword123"},
+        )
+        self.assertEqual(second.status_code, 400)
+
+        request = self.client.post(
+            "/api/auth/password-reset/request",
+            json={"email": "learner@example.com"},
+        )
+        expired_token = request.json()["reset_token"]
+        with session_factory()() as db:
+            reset = db.get(PasswordResetToken, hash_token(expired_token))
+            reset.expires_at = utcnow() - timedelta(minutes=1)
+            db.commit()
+        expired = self.client.post(
+            "/api/auth/password-reset/confirm",
+            json={"token": expired_token, "password": "anotherpassword123"},
+        )
+        self.assertEqual(expired.status_code, 400)
+
+    def test_oauth_config_start_invalid_state_and_callback_login(self):
+        os.environ["GOOGLE_OAUTH_CLIENT_ID"] = "google-client"
+        os.environ["GOOGLE_OAUTH_CLIENT_SECRET"] = "google-secret"
+        os.environ["GOOGLE_OAUTH_REDIRECT_URI"] = "http://testserver/api/auth/oauth/google/callback"
+        os.environ["OAUTH_SUCCESS_REDIRECT_URL"] = "http://localhost:3000/?oauth=success"
+
+        config = self.client.get("/api/auth/oauth/config")
+        self.assertEqual(config.status_code, 200)
+        google = config.json()["providers"][0]
+        self.assertTrue(google["configured"])
+        self.assertTrue(google["authorization_url"].endswith("/api/auth/oauth/google/start"))
+
+        start = self.client.get("/api/auth/oauth/google/start", follow_redirects=False)
+        self.assertEqual(start.status_code, 302)
+        location = start.headers["location"]
+        self.assertIn("accounts.google.com", location)
+        state = parse_qs(urlparse(location).query)["state"][0]
+
+        invalid = self.client.get(
+            "/api/auth/oauth/google/callback?code=abc&state=bad",
+            follow_redirects=False,
+        )
+        self.assertEqual(invalid.status_code, 400)
+
+        with patch.object(
+            api,
+            "exchange_oauth_profile",
+            new=AsyncMock(return_value=OAuthProfile("oauth@example.com", "OAuth Learner", "provider-id")),
+        ):
+            callback = self.client.get(
+                f"/api/auth/oauth/google/callback?code=abc&state={state}",
+                follow_redirects=False,
+            )
+        self.assertEqual(callback.status_code, 302)
+        self.assertEqual(callback.headers["location"], "http://localhost:3000/?oauth=success")
+        current = self.client.get("/api/auth/me")
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.json()["user"]["email"], "oauth@example.com")
+
+        reused = self.client.get(
+            f"/api/auth/oauth/google/callback?code=abc&state={state}",
+            follow_redirects=False,
+        )
+        self.assertEqual(reused.status_code, 400)
+
+    def test_oauth_callback_rejects_expired_state(self):
+        os.environ["GOOGLE_OAUTH_CLIENT_ID"] = "google-client"
+        os.environ["GOOGLE_OAUTH_CLIENT_SECRET"] = "google-secret"
+        os.environ["GOOGLE_OAUTH_REDIRECT_URI"] = "http://testserver/api/auth/oauth/google/callback"
+        with session_factory()() as db:
+            state = create_oauth_state(db, "google")
+            saved = db.get(api.OAuthState, hash_token(state))
+            saved.expires_at = utcnow() - timedelta(minutes=1)
+            db.commit()
+        expired = self.client.get(
+            f"/api/auth/oauth/google/callback?code=abc&state={state}",
+            follow_redirects=False,
+        )
+        self.assertEqual(expired.status_code, 400)
+
+    def test_login_rate_limit_returns_429(self):
+        os.environ["RATE_LIMIT_ENABLED"] = "true"
+        os.environ["RATE_LIMIT_LOGIN"] = "2/60s"
+        limiter.clear()
+        for _ in range(2):
+            response = self.client.post(
+                "/api/auth/login",
+                json={"email": "missing@example.com", "password": "password123"},
+            )
+            self.assertEqual(response.status_code, 401)
+        limited = self.client.post(
+            "/api/auth/login",
+            json={"email": "missing@example.com", "password": "password123"},
+        )
+        self.assertEqual(limited.status_code, 429)
+        self.assertIn("Too many requests", limited.json()["detail"])
 
     def test_saved_lesson_crud_and_cross_user_protection(self):
         owner = self.signup("owner@example.com")

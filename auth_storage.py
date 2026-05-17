@@ -83,6 +83,15 @@ class PasswordResetToken(Base):
     user: Mapped[User] = relationship()
 
 
+class OAuthState(Base):
+    __tablename__ = "oauth_states"
+
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: utcnow(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SavedLesson(Base):
     __tablename__ = "saved_lessons"
 
@@ -219,6 +228,20 @@ def create_password_reset_token(db: Session, user: User) -> str:
     )
     db.commit()
     return token
+
+
+def create_oauth_state(db: Session, provider: str) -> str:
+    state = secrets.token_urlsafe(32)
+    expires_minutes = int(os.environ.get("OAUTH_STATE_MINUTES", "10"))
+    db.add(
+        OAuthState(
+            state_hash=hash_token(state),
+            provider=provider,
+            expires_at=utcnow() + timedelta(minutes=expires_minutes),
+        )
+    )
+    db.commit()
+    return state
 
 
 def find_user_by_email(db: Session, email: str) -> Optional[User]:

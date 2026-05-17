@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -27,9 +29,11 @@ from sqlalchemy.orm import Session
 from auth_storage import (
     SESSION_COOKIE_NAME,
     AuthSession,
+    OAuthState,
     PasswordResetToken,
     SavedLesson as DBSavedLesson,
     User,
+    create_oauth_state,
     create_password_reset_token,
     create_session,
     find_user_by_email,
@@ -55,6 +59,22 @@ from content_intelligence import (
     infer_cefr_level,
     normalize_text,
 )
+from email_delivery import (
+    EmailDeliveryError,
+    build_password_reset_link,
+    email_delivery_configured,
+    send_password_reset_email,
+)
+from oauth_flow import (
+    OAuthError,
+    authorization_url,
+    configured_providers,
+    exchange_oauth_profile,
+    oauth_error_redirect_url,
+    oauth_success_redirect_url,
+    provider_config,
+)
+from rate_limit import RateLimitRule, rate_limit
 from speech import list_macos_voices
 from vocabulary_cards import (
     build_translation_lexicon,
@@ -340,6 +360,13 @@ def is_expired(expires_at) -> bool:  # type: ignore[no-untyped-def]
     return expires_at <= utcnow()
 
 
+def public_api_url(request: Request, path: str) -> str:
+    base = os.environ.get("PUBLIC_API_URL", "").strip().rstrip("/")
+    if base:
+        return f"{base}{path}"
+    return str(request.url_for("health")).removesuffix("/api/health") + path
+
+
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
@@ -439,7 +466,13 @@ async def voices(language: str = "auto") -> Dict[str, Any]:
 
 
 @app.post("/api/auth/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def signup(payload: SignupRequest, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
+async def signup(
+    payload: SignupRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AuthResponse:
+    rate_limit(request, "signup", RateLimitRule(5, 3600))
     email = validate_email(payload.email)
     validate_password(payload.password)
     name = payload.name.strip() or email.split("@", 1)[0]
@@ -458,7 +491,13 @@ async def signup(payload: SignupRequest, response: Response, db: Session = Depen
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
-async def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
+async def login(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AuthResponse:
+    rate_limit(request, "login", RateLimitRule(10, 300))
     email = validate_email(payload.email)
     user = find_user_by_email(db, email)
     if user is None or not verify_password(payload.password, user.password_hash):
@@ -489,19 +528,26 @@ async def me(user: User = Depends(current_user)) -> AuthResponse:
 @app.post("/api/auth/password-reset/request", response_model=PasswordResetRequestResponse)
 async def request_password_reset(
     payload: PasswordResetRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> PasswordResetRequestResponse:
+    rate_limit(request, "password_reset", RateLimitRule(5, 3600))
     email = validate_email(payload.email)
     user = find_user_by_email(db, email)
     reset_token = None
     if user is not None:
         token = create_password_reset_token(db, user)
+        if email_delivery_configured():
+            try:
+                send_password_reset_email(user.email, token)
+            except EmailDeliveryError:
+                pass
         if os.environ.get("PASSWORD_RESET_RETURN_TOKEN", "").lower() in {"1", "true", "yes"}:
             reset_token = token
 
-    email_configured = bool(os.environ.get("SMTP_HOST") or os.environ.get("RESEND_API_KEY"))
+    email_configured = email_delivery_configured()
     message = (
-        "If an account exists, a reset token was created. Configure SMTP_HOST or RESEND_API_KEY to email it."
+        "If an account exists, a reset token was created. Configure SMTP_HOST and SMTP_FROM_EMAIL to email it."
         if not email_configured
         else "If an account exists, password reset instructions will be sent."
     )
@@ -513,7 +559,12 @@ async def request_password_reset(
 
 
 @app.post("/api/auth/password-reset/confirm")
-async def confirm_password_reset(payload: PasswordResetConfirmRequest, db: Session = Depends(get_db)) -> Dict[str, bool]:
+async def confirm_password_reset(
+    payload: PasswordResetConfirmRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Dict[str, bool]:
+    rate_limit(request, "password_reset_confirm", RateLimitRule(10, 3600))
     validate_password(payload.password)
     reset = db.get(PasswordResetToken, hash_token(payload.token))
     if reset is None or reset.used_at is not None or is_expired(reset.expires_at):
@@ -530,15 +581,95 @@ async def confirm_password_reset(payload: PasswordResetConfirmRequest, db: Sessi
 
 
 @app.get("/api/auth/oauth/config", response_model=OAuthConfigResponse)
-async def oauth_config() -> OAuthConfigResponse:
-    google_ready = bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID") and os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET"))
-    github_ready = bool(os.environ.get("GITHUB_OAUTH_CLIENT_ID") and os.environ.get("GITHUB_OAUTH_CLIENT_SECRET"))
+async def oauth_config(request: Request) -> OAuthConfigResponse:
+    providers = configured_providers()
     return OAuthConfigResponse(
         providers=[
-            OAuthProvider(provider="google", configured=google_ready),
-            OAuthProvider(provider="github", configured=github_ready),
+            OAuthProvider(
+                provider="google",
+                configured=providers["google"],
+                authorization_url=public_api_url(request, "/api/auth/oauth/google/start")
+                if providers["google"]
+                else None,
+            ),
+            OAuthProvider(
+                provider="github",
+                configured=providers["github"],
+                authorization_url=public_api_url(request, "/api/auth/oauth/github/start")
+                if providers["github"]
+                else None,
+            ),
         ]
     )
+
+
+@app.get("/api/auth/oauth/{provider}/start", name="oauth_start")
+async def oauth_start(
+    provider: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    provider = provider.lower()
+    rate_limit(request, f"oauth_{provider}_start", RateLimitRule(20, 3600))
+    if provider_config(provider) is None:
+        raise HTTPException(status_code=404, detail="OAuth provider is not configured.")
+    state = create_oauth_state(db, provider)
+    return RedirectResponse(authorization_url(provider, state), status_code=302)
+
+
+@app.get("/api/auth/oauth/{provider}/callback", name="oauth_callback")
+async def oauth_callback(
+    provider: str,
+    request: Request,
+    response: Response,
+    code: str = "",
+    state: str = "",
+    error: str = "",
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    provider = provider.lower()
+    rate_limit(request, f"oauth_{provider}_callback", RateLimitRule(40, 3600))
+    if error:
+        return RedirectResponse(oauth_error_redirect_url("provider_error"), status_code=302)
+    if provider_config(provider) is None:
+        raise HTTPException(status_code=404, detail="OAuth provider is not configured.")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth callback.")
+
+    saved_state = db.get(OAuthState, hash_token(state))
+    if saved_state is None or saved_state.provider != provider or is_expired(saved_state.expires_at):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state.")
+
+    db.delete(saved_state)
+    db.commit()
+
+    try:
+        profile = await exchange_oauth_profile(provider, code)
+    except OAuthError:
+        return RedirectResponse(oauth_error_redirect_url("profile_error"), status_code=302)
+
+    user = find_user_by_email(db, profile.email)
+    if user is None:
+        user = User(
+            email=profile.email,
+            name=profile.name or profile.email.split("@", 1)[0],
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+        )
+        db.add(user)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            user = find_user_by_email(db, profile.email)
+            if user is None:
+                return RedirectResponse(oauth_error_redirect_url("account_error"), status_code=302)
+        else:
+            db.refresh(user)
+
+    token = create_session(db, user)
+    redirect = RedirectResponse(oauth_success_redirect_url(), status_code=302)
+    set_session_cookie(redirect, token)
+    return redirect
 
 
 @app.get("/api/lessons", response_model=List[SavedLessonResponse])
@@ -557,9 +688,11 @@ async def list_lessons(
 @app.post("/api/lessons", response_model=SavedLessonResponse, status_code=status.HTTP_201_CREATED)
 async def create_lesson(
     payload: SavedLessonCreate,
+    request: Request,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> SavedLessonResponse:
+    rate_limit(request, "lesson_write", RateLimitRule(120, 3600), user.id)
     title = payload.title.strip() or "Turkish lesson"
     lesson = DBSavedLesson(user_id=user.id, title=title, result=model_dump(payload.result))
     db.add(lesson)
@@ -584,9 +717,11 @@ async def get_lesson(
 async def update_lesson(
     lesson_id: str,
     payload: SavedLessonUpdate,
+    request: Request,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> SavedLessonResponse:
+    rate_limit(request, "lesson_write", RateLimitRule(120, 3600), user.id)
     lesson = db.get(DBSavedLesson, lesson_id)
     if lesson is None or lesson.user_id != user.id:
         raise HTTPException(status_code=404, detail="Saved lesson not found.")
@@ -604,9 +739,11 @@ async def update_lesson(
 @app.delete("/api/lessons/{lesson_id}")
 async def delete_lesson(
     lesson_id: str,
+    request: Request,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, bool]:
+    rate_limit(request, "lesson_write", RateLimitRule(120, 3600), user.id)
     lesson = db.get(DBSavedLesson, lesson_id)
     if lesson is None or lesson.user_id != user.id:
         raise HTTPException(status_code=404, detail="Saved lesson not found.")
@@ -617,11 +754,13 @@ async def delete_lesson(
 
 @app.post("/api/study", response_model=StudyResponse)
 async def study(
+    request: Request,
     text: str = Form(""),
     level: str = Form("A1"),
     target_language: str = Form("English"),
     file: Optional[UploadFile] = File(None),
 ) -> StudyResponse:
+    rate_limit(request, "study", RateLimitRule(30, 3600))
     requested_level = normalize_level(level)
     try:
         if file and file.filename:

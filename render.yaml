@@ -12,6 +12,8 @@ services:
         sync: false
       - key: FRONTEND_ORIGIN
         value: https://turkish-tutor-web.onrender.com
+      - key: PUBLIC_API_URL
+        value: https://turkish-tutor-api.onrender.com
       - key: DATABASE_URL
         fromDatabase:
           name: turkish-tutor-db
@@ -24,6 +26,50 @@ services:
         value: "none"
       - key: PASSWORD_RESET_RETURN_TOKEN
         value: "false"
+      - key: PASSWORD_RESET_BASE_URL
+        value: https://turkish-tutor-web.onrender.com
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_USE_TLS
+        value: "true"
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REDIRECT_URI
+        value: https://turkish-tutor-api.onrender.com/api/auth/oauth/google/callback
+      - key: GITHUB_OAUTH_CLIENT_ID
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_OAUTH_REDIRECT_URI
+        value: https://turkish-tutor-api.onrender.com/api/auth/oauth/github/callback
+      - key: OAUTH_SUCCESS_REDIRECT_URL
+        value: https://turkish-tutor-web.onrender.com/?oauth=success
+      - key: OAUTH_ERROR_REDIRECT_URL
+        value: https://turkish-tutor-web.onrender.com/?oauth=error
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_SIGNUP
+        value: "5/1h"
+      - key: RATE_LIMIT_LOGIN
+        value: "10/5m"
+      - key: RATE_LIMIT_PASSWORD_RESET
+        value: "5/1h"
+      - key: RATE_LIMIT_PASSWORD_RESET_CONFIRM
+        value: "10/1h"
+      - key: RATE_LIMIT_STUDY
+        value: "30/1h"
+      - key: RATE_LIMIT_LESSON_WRITE
+        value: "120/1h"
 
   - type: web
     name: turkish-tutor-web

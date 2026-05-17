@@ -6,10 +6,14 @@ import {
   VocabularyCard,
   createSavedLesson,
   deserializeLessons,
+  examplePlaybackQueue,
   exampleSegments,
   formatPair,
+  playbackProgress,
   serializeLessons,
+  textQueueItem,
   upsertLesson,
+  wordPlaybackQueue,
   wordSegments
 } from "./learning";
 
@@ -54,6 +58,33 @@ test("exampleSegments can return only translation", () => {
   assert.deepEqual(exampleSegments(card, "English", "translation"), [
     { text: "Come here.", lang: "en-US" }
   ]);
+});
+
+test("playback queues preserve word and example metadata", () => {
+  const words = wordPlaybackQueue([card], "English", "bilingual");
+  assert.equal(words.length, 1);
+  assert.equal(words[0].title, "gel");
+  assert.equal(words[0].subtitle, "come");
+  assert.deepEqual(words[0].segments, [
+    { text: "gel", lang: "tr-TR" },
+    { text: "come", lang: "en-US" }
+  ]);
+
+  const examples = examplePlaybackQueue([card], "English", "bilingual");
+  assert.equal(examples[0].title, "Buraya gel.");
+  assert.equal(examples[0].subtitle, "Come here.");
+});
+
+test("text queue and progress helpers are deterministic", () => {
+  assert.deepEqual(textQueueItem("  Merhaba   dünya  "), {
+    id: "study-note",
+    title: "Study note",
+    subtitle: "Turkce Hoca",
+    segments: [{ text: "Merhaba dünya", lang: "tr-TR" }]
+  });
+  assert.equal(playbackProgress(0, 3), "1 of 3");
+  assert.equal(playbackProgress(10, 3), "3 of 3");
+  assert.equal(playbackProgress(0, 0), "Ready");
 });
 
 test("saved lessons serialize, deserialize, and upsert", () => {

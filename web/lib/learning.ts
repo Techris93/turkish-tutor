@@ -44,6 +44,13 @@ export type SpeechSegment = {
   lang: string;
 };
 
+export type PlaybackQueueItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  segments: SpeechSegment[];
+};
+
 export const SAVED_LESSONS_KEY = "turkce-hoca.saved-lessons.v1";
 
 const targetLanguageCodes: Record<string, string> = {
@@ -96,6 +103,60 @@ export function exampleSegments(card: VocabularyCard, targetLanguage: string, mo
     { text: normalizeSpeechText(card.tts_sentence || card.example_tr), lang: "tr-TR" },
     { text: normalizeSpeechText(card.example_translation), lang: languageCode(targetLanguage) }
   ].filter((segment) => segment.text);
+}
+
+function queueItem(id: string, title: string, subtitle: string, segments: SpeechSegment[]): PlaybackQueueItem {
+  return {
+    id,
+    title: normalizeSpeechText(title),
+    subtitle: normalizeSpeechText(subtitle),
+    segments: segments.filter((segment) => normalizeSpeechText(segment.text)).map((segment) => ({
+      ...segment,
+      text: normalizeSpeechText(segment.text)
+    }))
+  };
+}
+
+export function textQueueItem(text: string, title = "Study note"): PlaybackQueueItem {
+  return queueItem("study-note", title, "Turkce Hoca", [{ text: normalizeSpeechText(text), lang: "tr-TR" }]);
+}
+
+export function wordPlaybackQueue(
+  cards: VocabularyCard[],
+  targetLanguage: string,
+  mode: PlaybackMode
+): PlaybackQueueItem[] {
+  return cards.map((card, index) =>
+    queueItem(
+      `word-${index}-${card.turkish}`,
+      card.turkish,
+      card.translation || card.item_type,
+      wordSegments(card, targetLanguage, mode)
+    )
+  );
+}
+
+export function examplePlaybackQueue(
+  cards: VocabularyCard[],
+  targetLanguage: string,
+  mode: PlaybackMode
+): PlaybackQueueItem[] {
+  return cards.map((card, index) =>
+    queueItem(
+      `example-${index}-${card.turkish}`,
+      card.example_tr || card.turkish,
+      card.example_translation || card.translation,
+      exampleSegments(card, targetLanguage, mode)
+    )
+  );
+}
+
+export function playbackProgress(currentIndex: number, total: number): string {
+  if (total <= 0) {
+    return "Ready";
+  }
+  const current = Math.min(Math.max(currentIndex + 1, 1), total);
+  return `${current} of ${total}`;
 }
 
 export function createSavedLesson(result: StudyResponse, title?: string): SavedLesson {

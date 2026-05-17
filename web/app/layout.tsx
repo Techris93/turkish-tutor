@@ -3,7 +3,13 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Turkce Hoca",
-  description: "A CEFR-aware Turkish tutor workspace"
+  description: "A CEFR-aware Turkish tutor workspace",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Turkce Hoca"
+  }
 };
 
 export default function RootLayout({

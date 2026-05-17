@@ -167,6 +167,20 @@ In the frontend, use:
 
 Browser text-to-speech uses `SpeechSynthesis`. The app tries to use a Turkish voice for Turkish segments and a target-language voice for translations. Available voices vary by browser and operating system, so install system voices if pronunciation quality is limited.
 
+### Background Playback And PWA
+
+The web app is installable as a lightweight PWA. On supported browsers, install it from the browser menu or address-bar install button, then open it from the home screen/app launcher for the best background playback behavior.
+
+Read-aloud playback now uses a queue controller with progress, previous/next controls, pause/resume/stop, and Media Session API handlers. Where the browser supports Media Session, system media controls can show the current Turkish word/example and can control play, pause, stop, previous, and next.
+
+Important limits:
+
+- The current implementation uses browser `SpeechSynthesis`, not generated audio files.
+- Desktop browsers usually allow speech to continue while the tab is hidden or the window is minimized.
+- Mobile locked-screen playback is browser and OS dependent. iOS Safari and some mobile browsers may pause or stop browser-generated speech when the screen locks.
+- Installing the PWA can improve the chance of background controls, but it cannot override mobile OS restrictions.
+- A future generated-audio provider such as ElevenLabs, Google Cloud TTS, Azure TTS, or OpenAI TTS can be added behind environment variables if guaranteed locked-screen audio becomes required.
+
 ### Saved Lessons And Accounts
 
 The web app can save the current study result as a lesson:

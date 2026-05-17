@@ -13,24 +13,31 @@ import {
   RefreshCw,
   Search,
   Send,
+  SkipBack,
+  SkipForward,
   Square,
   Trash2,
   UserPlus,
   Upload
 } from "lucide-react";
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   PlaybackMode,
+  PlaybackQueueItem,
   SAVED_LESSONS_KEY,
   SavedLesson,
   SpeechSegment,
   StudyResponse,
   createSavedLesson,
   deserializeLessons,
+  examplePlaybackQueue,
   exampleSegments,
   formatPair,
+  playbackProgress,
   serializeLessons,
+  textQueueItem,
   upsertLesson,
+  wordPlaybackQueue,
   wordSegments
 } from "../lib/learning";
 
@@ -137,6 +144,11 @@ export default function Home() {
   const [speechRate, setSpeechRate] = useState(1);
   const [speaking, setSpeaking] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [playbackLabel, setPlaybackLabel] = useState("");
+  const [playbackCurrent, setPlaybackCurrent] = useState(0);
+  const [playbackTotal, setPlaybackTotal] = useState(0);
+  const [playbackNotice, setPlaybackNotice] = useState("");
+  const [pwaReady, setPwaReady] = useState(false);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("bilingual");
@@ -158,6 +170,10 @@ export default function Home() {
   const [lessonTitle, setLessonTitle] = useState("");
   const [lessonSearch, setLessonSearch] = useState("");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
+  const playbackQueueRef = useRef<PlaybackQueueItem[]>([]);
+  const playbackItemIndexRef = useRef(0);
+  const playbackSegmentIndexRef = useRef(0);
+  const playbackRunRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -255,6 +271,20 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!("serviceWorker" in navigator)) {
+      return;
+    }
+    const canRegister = window.location.protocol === "https:" || window.location.hostname === "localhost";
+    if (!canRegister) {
+      return;
+    }
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then(() => setPwaReady(true))
+      .catch(() => setPwaReady(false));
+  }, []);
+
+  useEffect(() => {
     if (!lessonsLoaded) {
       return;
     }
@@ -318,6 +348,49 @@ export default function Home() {
     return () => {
       window.speechSynthesis.onvoiceschanged = null;
     };
+  }, []);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) {
+      return;
+    }
+
+    const handlers: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+      [
+        "play",
+        () => {
+          if ("speechSynthesis" in window) {
+            window.speechSynthesis.resume();
+            setPaused(false);
+            navigator.mediaSession.playbackState = "playing";
+          }
+        }
+      ],
+      ["pause", () => pauseOrResume()],
+      ["stop", () => stopSpeech()],
+      ["previoustrack", () => skipPlayback(-1)],
+      ["nexttrack", () => skipPlayback(1)]
+    ];
+
+    for (const [action, handler] of handlers) {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+        // Some browsers expose Media Session but not every action.
+      }
+    }
+
+    return () => {
+      for (const [action] of handlers) {
+        try {
+          navigator.mediaSession.setActionHandler(action, null);
+        } catch {
+          // Ignore unsupported actions during cleanup.
+        }
+      }
+    };
+    // Media Session handlers delegate to the current playback refs; registering once avoids duplicate handlers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const turkishVoices = useMemo(
@@ -419,48 +492,117 @@ export default function Home() {
     );
   }
 
-  function speakSegments(segments: SpeechSegment[]) {
-    const queue = segments.filter((segment) => segment.text.trim());
-    if (!("speechSynthesis" in window) || queue.length === 0) {
+  function setMediaSession(item: PlaybackQueueItem | null, state: MediaSessionPlaybackState = "none") {
+    if (!("mediaSession" in navigator)) {
       return;
     }
-    window.speechSynthesis.cancel();
+    navigator.mediaSession.playbackState = state;
+    navigator.mediaSession.metadata = item
+      ? new MediaMetadata({
+          title: item.title || "Turkce Hoca",
+          artist: item.subtitle || "Turkish tutor",
+          album: playbackLabel || "Read Aloud"
+        })
+      : null;
+  }
 
-    let index = 0;
+  function resetPlaybackState(message = "") {
+    setSpeaking(false);
+    setPaused(false);
+    setPlaybackCurrent(0);
+    setPlaybackTotal(0);
+    setPlaybackLabel("");
+    setPlaybackNotice(message);
+    setMediaSession(null, "none");
+  }
 
-    const playNext = () => {
-      if (index >= queue.length) {
-        setSpeaking(false);
-        setPaused(false);
-        return;
-      }
-      const segment = queue[index];
-      const utterance = new SpeechSynthesisUtterance(segment.text);
-      utterance.lang = segment.lang;
-      utterance.rate = speechRate;
-      const voice = selectVoiceForLanguage(segment.lang);
-      if (voice) {
-        utterance.voice = voice;
-        utterance.lang = voice.lang;
-      }
-      utterance.onend = () => {
-        index += 1;
-        playNext();
-      };
-      utterance.onerror = () => {
-        setSpeaking(false);
-        setPaused(false);
-      };
-      window.speechSynthesis.speak(utterance);
-    };
+  function playCurrentSegment() {
+    const queue = playbackQueueRef.current;
+    const item = queue[playbackItemIndexRef.current];
+    if (!item) {
+      resetPlaybackState("");
+      return;
+    }
 
+    const segment = item.segments[playbackSegmentIndexRef.current];
+    if (!segment) {
+      playbackItemIndexRef.current += 1;
+      playbackSegmentIndexRef.current = 0;
+      playCurrentSegment();
+      return;
+    }
+
+    const runId = playbackRunRef.current;
     setSpeaking(true);
     setPaused(false);
-    playNext();
+    setPlaybackCurrent(playbackItemIndexRef.current);
+    setPlaybackTotal(queue.length);
+    setMediaSession(item, "playing");
+
+    const utterance = new SpeechSynthesisUtterance(segment.text);
+    utterance.lang = segment.lang;
+    utterance.rate = speechRate;
+    const voice = selectVoiceForLanguage(segment.lang);
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang;
+    }
+    utterance.onend = () => {
+      if (runId !== playbackRunRef.current) {
+        return;
+      }
+      playbackSegmentIndexRef.current += 1;
+      playCurrentSegment();
+    };
+    utterance.onerror = () => {
+      if (runId !== playbackRunRef.current) {
+        return;
+      }
+      resetPlaybackState("Playback stopped. This browser may have blocked background speech.");
+    };
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function startPlaybackQueue(queueItems: PlaybackQueueItem[], label: string) {
+    const queue = queueItems.filter((item) => item.segments.length);
+    if (!("speechSynthesis" in window)) {
+      setPlaybackNotice("This browser does not support built-in text-to-speech.");
+      return;
+    }
+    if (!queue.length) {
+      setPlaybackNotice("Nothing is ready to read aloud yet.");
+      return;
+    }
+    playbackRunRef.current += 1;
+    window.speechSynthesis.cancel();
+    playbackQueueRef.current = queue;
+    playbackItemIndexRef.current = 0;
+    playbackSegmentIndexRef.current = 0;
+    setPlaybackLabel(label);
+    setPlaybackTotal(queue.length);
+    setPlaybackCurrent(0);
+    setPlaybackNotice(
+      "Using browser speech. It can continue while minimized in many browsers, but locked-screen playback depends on your device."
+    );
+    playCurrentSegment();
+  }
+
+  function speakSegments(segments: SpeechSegment[], label = "Read Aloud") {
+    startPlaybackQueue(
+      [
+        {
+          id: "custom",
+          title: label,
+          subtitle: "Turkce Hoca",
+          segments
+        }
+      ],
+      label
+    );
   }
 
   function speakTexts(texts: string[]) {
-    speakSegments(texts.map((item) => ({ text: item, lang: "tr-TR" })));
+    startPlaybackQueue(texts.map((item) => textQueueItem(item)), "Study note");
   }
 
   function speak() {
@@ -703,19 +845,41 @@ export default function Home() {
     if (paused) {
       window.speechSynthesis.resume();
       setPaused(false);
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "playing";
+      }
     } else {
       window.speechSynthesis.pause();
       setPaused(true);
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "paused";
+      }
     }
+  }
+
+  function skipPlayback(direction: number) {
+    const queue = playbackQueueRef.current;
+    if (!queue.length || !("speechSynthesis" in window)) {
+      return;
+    }
+    const nextIndex = Math.min(Math.max(playbackItemIndexRef.current + direction, 0), queue.length - 1);
+    playbackRunRef.current += 1;
+    window.speechSynthesis.cancel();
+    playbackItemIndexRef.current = nextIndex;
+    playbackSegmentIndexRef.current = 0;
+    playCurrentSegment();
   }
 
   function stopSpeech() {
     if (!("speechSynthesis" in window)) {
       return;
     }
+    playbackRunRef.current += 1;
     window.speechSynthesis.cancel();
-    setSpeaking(false);
-    setPaused(false);
+    playbackQueueRef.current = [];
+    playbackItemIndexRef.current = 0;
+    playbackSegmentIndexRef.current = 0;
+    resetPlaybackState("");
   }
 
   const filteredLessons = useMemo(() => {
@@ -1118,10 +1282,13 @@ export default function Home() {
                   disabled={!result?.vocabulary_cards.length}
                   type="button"
                   onClick={() =>
-                    speakSegments(
-                      (result?.vocabulary_cards ?? []).flatMap((card) =>
-                        wordSegments(card, result?.target_language ?? targetLanguage, playbackMode)
-                      )
+                    startPlaybackQueue(
+                      wordPlaybackQueue(
+                        result?.vocabulary_cards ?? [],
+                        result?.target_language ?? targetLanguage,
+                        playbackMode
+                      ),
+                      "Words"
                     )
                   }
                 >
@@ -1133,10 +1300,13 @@ export default function Home() {
                   disabled={!result?.vocabulary_cards.length}
                   type="button"
                   onClick={() =>
-                    speakSegments(
-                      (result?.vocabulary_cards ?? []).flatMap((card) =>
-                        exampleSegments(card, result?.target_language ?? targetLanguage, playbackMode)
-                      )
+                    startPlaybackQueue(
+                      examplePlaybackQueue(
+                        result?.vocabulary_cards ?? [],
+                        result?.target_language ?? targetLanguage,
+                        playbackMode
+                      ),
+                      "Examples"
                     )
                   }
                 >
@@ -1153,6 +1323,24 @@ export default function Home() {
                   {paused ? "Resume" : "Pause"}
                 </button>
                 <button
+                  aria-label="Previous item"
+                  className="icon-button"
+                  disabled={!speaking || playbackTotal < 2}
+                  type="button"
+                  onClick={() => skipPlayback(-1)}
+                >
+                  <SkipBack size={18} />
+                </button>
+                <button
+                  aria-label="Next item"
+                  className="icon-button"
+                  disabled={!speaking || playbackTotal < 2}
+                  type="button"
+                  onClick={() => skipPlayback(1)}
+                >
+                  <SkipForward size={18} />
+                </button>
+                <button
                   aria-label="Stop playback"
                   className="icon-button"
                   disabled={!speaking}
@@ -1162,6 +1350,16 @@ export default function Home() {
                   <Square size={18} />
                 </button>
               </div>
+              <div className="playback-status" aria-live="polite">
+                <span>{speaking ? playbackLabel || "Read Aloud" : "Background playback"}</span>
+                <strong>{speaking ? playbackProgress(playbackCurrent, playbackTotal) : pwaReady ? "PWA ready" : "Browser speech"}</strong>
+              </div>
+              <p className="muted-copy">
+                Browser speech may keep playing when the tab is hidden or the app is minimized. On mobile, locked-screen
+                playback depends on Safari/Chrome and the operating system; install the app for the best chance of
+                background controls.
+              </p>
+              {playbackNotice ? <p className="voice-warning">{playbackNotice}</p> : null}
               {!turkishVoices.length ? (
                 <p className="voice-warning">
                   No Turkish browser voice is currently available. Playback will use the closest installed voice.

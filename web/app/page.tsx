@@ -78,6 +78,10 @@ async function apiJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
+function isAuthRequired(error: unknown): boolean {
+  return error instanceof Error && /authentication required|session expired/i.test(error.message);
+}
+
 export default function Home() {
   const [text, setText] = useState("Merhaba, bugün Türkçe öğreniyorum.");
   const [file, setFile] = useState<File | null>(null);
@@ -171,7 +175,12 @@ export default function Home() {
       setAuthMessage("OAuth login completed.");
       window.history.replaceState({}, "", window.location.pathname);
     } else if (oauth === "error") {
-      setAuthError("OAuth login could not be completed. Please try again or use email login.");
+      const reason = params.get("reason");
+      setAuthError(
+        reason === "account_mismatch"
+          ? "That Google/GitHub email belongs to a different account. Log out first to switch accounts, or use OAuth with the same email."
+          : "OAuth login could not be completed. Please try again or use email login."
+      );
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -190,7 +199,8 @@ export default function Home() {
         const payload = await apiJson<{ user: AuthUser }>("/api/auth/me");
         if (!cancelled) {
           setUser(payload.user);
-          await loadRemoteLessons();
+          const lessons = await apiJson<SavedLesson[]>("/api/lessons");
+          setSavedLessons(lessons);
           setActiveLessonId(null);
         }
       } catch {
@@ -394,6 +404,19 @@ export default function Home() {
       const lessons = await apiJson<SavedLesson[]>("/api/lessons");
       setSavedLessons(lessons);
     } catch (caught) {
+      if (isAuthRequired(caught)) {
+        try {
+          await apiJson<{ user: AuthUser }>("/api/auth/me");
+          const lessons = await apiJson<SavedLesson[]>("/api/lessons");
+          setSavedLessons(lessons);
+          return;
+        } catch {
+          setUser(null);
+          setSavedLessons(localLessons);
+          setAuthError("Your sign-in session was not accepted. Please log in again.");
+          return;
+        }
+      }
       setLessonError(caught instanceof Error ? caught.message : "Could not load saved lessons.");
     } finally {
       setLessonsLoading(false);

@@ -269,6 +269,30 @@ class AuthLessonTests(unittest.TestCase):
         )
         self.assertEqual(expired.status_code, 400)
 
+    def test_oauth_does_not_switch_signed_in_account_to_different_email(self):
+        signed_in = self.signup("password@example.com")
+        os.environ["GOOGLE_OAUTH_CLIENT_ID"] = "google-client"
+        os.environ["GOOGLE_OAUTH_CLIENT_SECRET"] = "google-secret"
+        os.environ["GOOGLE_OAUTH_REDIRECT_URI"] = "http://testserver/api/auth/oauth/google/callback"
+        os.environ["OAUTH_ERROR_REDIRECT_URL"] = "http://localhost:3000/?oauth=error"
+
+        start = signed_in.get("/api/auth/oauth/google/start", follow_redirects=False)
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        with patch.object(
+            api,
+            "exchange_oauth_profile",
+            new=AsyncMock(return_value=OAuthProfile("google@example.com", "Google User", "provider-id")),
+        ):
+            callback = signed_in.get(
+                f"/api/auth/oauth/google/callback?code=abc&state={state}",
+                follow_redirects=False,
+            )
+        self.assertEqual(callback.status_code, 302)
+        self.assertIn("reason=account_mismatch", callback.headers["location"])
+        current = signed_in.get("/api/auth/me")
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.json()["user"]["email"], "password@example.com")
+
     def test_login_rate_limit_returns_429(self):
         os.environ["RATE_LIMIT_ENABLED"] = "true"
         os.environ["RATE_LIMIT_LOGIN"] = "2/60s"

@@ -389,6 +389,25 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+def optional_current_user(request: Request, db: Session) -> Optional[User]:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        return None
+    auth_session = db.get(AuthSession, hash_token(token))
+    if auth_session is None:
+        return None
+    if is_expired(auth_session.expires_at):
+        db.delete(auth_session)
+        db.commit()
+        return None
+    user = db.get(User, auth_session.user_id)
+    if user is None:
+        db.delete(auth_session)
+        db.commit()
+        return None
+    return user
+
+
 async def extract_upload(upload: UploadFile, current_level: str) -> ExtractedContent:
     suffix = Path(upload.filename or "upload").suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
@@ -648,7 +667,11 @@ async def oauth_callback(
     except OAuthError:
         return RedirectResponse(oauth_error_redirect_url("profile_error"), status_code=302)
 
-    user = find_user_by_email(db, profile.email)
+    signed_in_user = optional_current_user(request, db)
+    if signed_in_user is not None and signed_in_user.email != profile.email:
+        return RedirectResponse(oauth_error_redirect_url("account_mismatch"), status_code=302)
+
+    user = signed_in_user or find_user_by_email(db, profile.email)
     if user is None:
         user = User(
             email=profile.email,

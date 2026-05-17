@@ -1,5 +1,5 @@
 export type PlaybackMode = "turkish" | "translation" | "bilingual";
-export type PlaybackEngine = "auto" | "generated" | "browser";
+export type PlaybackEngine = "generated" | "browser";
 
 export type StudyUnit = {
   text: string;
@@ -175,16 +175,7 @@ export function shouldUseGeneratedAudio(
   generatedConfigured: boolean,
   signedIn: boolean
 ): boolean {
-  if (!signedIn) {
-    return false;
-  }
-  if (engine === "browser") {
-    return false;
-  }
-  if (engine === "generated") {
-    return generatedConfigured;
-  }
-  return generatedConfigured;
+  return engine === "generated" && generatedConfigured && signedIn;
 }
 
 export function createSavedLesson(result: StudyResponse, title?: string): SavedLesson {

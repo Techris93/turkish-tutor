@@ -160,7 +160,7 @@ export default function Home() {
   const [playbackTotal, setPlaybackTotal] = useState(0);
   const [playbackNotice, setPlaybackNotice] = useState("");
   const [pwaReady, setPwaReady] = useState(false);
-  const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>("auto");
+  const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>("browser");
   const [ttsConfig, setTtsConfig] = useState<TTSConfigResponse | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const [activeEngine, setActiveEngine] = useState<"generated" | "browser" | "idle">("idle");
@@ -703,6 +703,14 @@ export default function Home() {
   function startPlaybackQueue(queueItems: PlaybackQueueItem[], label: string) {
     const queue = queueItems.filter((item) => item.segments.length);
     const useGenerated = shouldUseGeneratedAudio(playbackEngine, Boolean(ttsConfig?.configured), Boolean(user));
+    if (playbackEngine === "generated" && !useGenerated) {
+      setPlaybackNotice(
+        !ttsConfig?.configured
+          ? "Generated audio is not configured. Choose Browser speech, or add OpenAI TTS settings on the API."
+          : "Sign in to use generated audio, or choose Browser speech."
+      );
+      return;
+    }
     if (!useGenerated && !("speechSynthesis" in window)) {
       setPlaybackNotice("This browser does not support built-in text-to-speech.");
       return;
@@ -724,9 +732,7 @@ export default function Home() {
     setPlaybackNotice(
       useGenerated
         ? "Using generated audio. This is the recommended mode for mobile background and lock-screen listening."
-        : playbackEngine === "generated"
-          ? "Generated audio is not configured or you are not signed in."
-          : "Using browser speech. It can continue while minimized in many browsers, but locked-screen playback depends on your device."
+        : "Using browser speech. It can continue while minimized in many browsers, but locked-screen playback depends on your device."
     );
     void playCurrentSegment();
   }
@@ -1417,9 +1423,8 @@ export default function Home() {
                     value={playbackEngine}
                     onChange={(event) => setPlaybackEngine(event.target.value as PlaybackEngine)}
                   >
-                    <option value="auto">Auto</option>
-                    <option value="generated">Generated audio</option>
                     <option value="browser">Browser speech</option>
+                    <option value="generated">Generated audio</option>
                   </select>
                 </div>
                 <div className="field">
@@ -1533,8 +1538,8 @@ export default function Home() {
                 </strong>
               </div>
               <p className="muted-copy">
-                Generated audio is recommended for mobile background and lock-screen listening. Browser speech remains
-                available as a free fallback; exact behavior still depends on Safari/Chrome and your operating system.
+                Browser speech is the default and does not call the generated-audio API. Select Generated audio only when
+                you want provider audio for stronger mobile background playback; it may use paid API credits.
               </p>
               {!ttsConfig?.configured && playbackEngine !== "browser" ? (
                 <p className="voice-warning">

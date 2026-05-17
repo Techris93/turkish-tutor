@@ -96,12 +96,11 @@ test("generated audio cache keys include text, voice, speed, and provider", () =
   assert.equal(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "nova", 1.004));
 });
 
-test("generated audio engine selection respects config and auth state", () => {
-  assert.equal(shouldUseGeneratedAudio("auto", true, true), true);
-  assert.equal(shouldUseGeneratedAudio("auto", false, true), false);
+test("generated audio engine selection requires explicit generated mode", () => {
   assert.equal(shouldUseGeneratedAudio("generated", true, true), true);
   assert.equal(shouldUseGeneratedAudio("generated", true, false), false);
   assert.equal(shouldUseGeneratedAudio("browser", true, true), false);
+  assert.equal(shouldUseGeneratedAudio("browser", false, true), false);
 });
 
 test("saved lessons serialize, deserialize, and upsert", () => {

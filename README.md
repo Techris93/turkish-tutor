@@ -167,9 +167,8 @@ In the frontend, use:
 
 Read-aloud can use generated audio or browser text-to-speech:
 
-- `Auto`: uses generated audio when the API is configured and the learner is signed in, otherwise falls back to browser speech.
-- `Generated audio`: uses backend-generated audio through an `HTMLAudioElement`.
-- `Browser speech`: uses the browser `SpeechSynthesis` engine only.
+- `Browser speech`: the default. It uses the browser `SpeechSynthesis` engine only and never calls the generated-audio API.
+- `Generated audio`: an explicit opt-in. It uses backend-generated audio through an `HTMLAudioElement` and may use paid provider credits.
 
 Browser text-to-speech tries to use a Turkish voice for Turkish segments and a target-language voice for translations. Available voices vary by browser and operating system, so install system voices if pronunciation quality is limited.
 
@@ -205,7 +204,7 @@ RATE_LIMIT_TTS=120/1h
 
 For tests or local smoke checks without a paid provider, use `TTS_PROVIDER=mock`. The mock provider returns a tiny generated WAV tone and must not be used as production speech.
 
-Generated audio requires a signed-in user and is rate-limited to control provider cost. If `TTS_PROVIDER` or `OPENAI_API_KEY` is missing, the frontend shows a clear message and `Auto` falls back to browser speech.
+Generated audio requires a signed-in user and is rate-limited to control provider cost. If `TTS_PROVIDER` or `OPENAI_API_KEY` is missing, the frontend shows a clear message. Normal `Play`, `Words`, `Examples`, and per-card playback use browser speech unless the learner explicitly selects `Generated audio`.
 
 On Render, set `OPENAI_API_KEY` as a secret environment variable. The Blueprint includes non-secret defaults for `TTS_PROVIDER=openai`, `OPENAI_TTS_MODEL`, voices, timeout, and `RATE_LIMIT_TTS`.
 

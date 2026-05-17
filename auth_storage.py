@@ -92,6 +92,18 @@ class OAuthState(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class OAuthHandoff(Base):
+    __tablename__ = "oauth_handoffs"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: utcnow(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship()
+
+
 class SavedLesson(Base):
     __tablename__ = "saved_lessons"
 
@@ -242,6 +254,20 @@ def create_oauth_state(db: Session, provider: str) -> str:
     )
     db.commit()
     return state
+
+
+def create_oauth_handoff(db: Session, user: User) -> str:
+    token = secrets.token_urlsafe(32)
+    expires_minutes = int(os.environ.get("OAUTH_HANDOFF_MINUTES", "5"))
+    db.add(
+        OAuthHandoff(
+            token_hash=hash_token(token),
+            user_id=user.id,
+            expires_at=utcnow() + timedelta(minutes=expires_minutes),
+        )
+    )
+    db.commit()
+    return token
 
 
 def find_user_by_email(db: Session, email: str) -> Optional[User]:

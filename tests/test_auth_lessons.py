@@ -243,10 +243,21 @@ class AuthLessonTests(unittest.TestCase):
                 follow_redirects=False,
             )
         self.assertEqual(callback.status_code, 302)
-        self.assertEqual(callback.headers["location"], "http://localhost:3000/?oauth=success")
+        callback_url = urlparse(callback.headers["location"])
+        callback_params = parse_qs(callback_url.query)
+        self.assertEqual(callback_params["oauth"], ["success"])
+        handoff = callback_params["handoff"][0]
         current = self.client.get("/api/auth/me")
         self.assertEqual(current.status_code, 200)
         self.assertEqual(current.json()["user"]["email"], "oauth@example.com")
+
+        redeem_client = TestClient(api.app)
+        redeemed = redeem_client.post("/api/auth/oauth/redeem", json={"handoff": handoff})
+        self.assertEqual(redeemed.status_code, 200)
+        self.assertEqual(redeemed.json()["user"]["email"], "oauth@example.com")
+        self.assertEqual(redeem_client.get("/api/auth/me").status_code, 200)
+        reused_handoff = TestClient(api.app).post("/api/auth/oauth/redeem", json={"handoff": handoff})
+        self.assertEqual(reused_handoff.status_code, 400)
 
         reused = self.client.get(
             f"/api/auth/oauth/google/callback?code=abc&state={state}",
@@ -267,6 +278,34 @@ class AuthLessonTests(unittest.TestCase):
             f"/api/auth/oauth/google/callback?code=abc&state={state}",
             follow_redirects=False,
         )
+        self.assertEqual(expired.status_code, 400)
+
+    def test_oauth_redeem_rejects_invalid_and_expired_handoff(self):
+        self.assertEqual(
+            self.client.post("/api/auth/oauth/redeem", json={"handoff": "missing"}).status_code,
+            400,
+        )
+        signed_in = self.signup("handoff@example.com")
+        os.environ["GOOGLE_OAUTH_CLIENT_ID"] = "google-client"
+        os.environ["GOOGLE_OAUTH_CLIENT_SECRET"] = "google-secret"
+        os.environ["GOOGLE_OAUTH_REDIRECT_URI"] = "http://testserver/api/auth/oauth/google/callback"
+        start = signed_in.get("/api/auth/oauth/google/start", follow_redirects=False)
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        with patch.object(
+            api,
+            "exchange_oauth_profile",
+            new=AsyncMock(return_value=OAuthProfile("handoff@example.com", "Handoff", "provider-id")),
+        ):
+            callback = signed_in.get(
+                f"/api/auth/oauth/google/callback?code=abc&state={state}",
+                follow_redirects=False,
+            )
+        handoff = parse_qs(urlparse(callback.headers["location"]).query)["handoff"][0]
+        with session_factory()() as db:
+            saved = db.get(api.OAuthHandoff, hash_token(handoff))
+            saved.expires_at = utcnow() - timedelta(minutes=1)
+            db.commit()
+        expired = TestClient(api.app).post("/api/auth/oauth/redeem", json={"handoff": handoff})
         self.assertEqual(expired.status_code, 400)
 
     def test_oauth_does_not_switch_signed_in_account_to_different_email(self):

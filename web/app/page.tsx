@@ -57,6 +57,11 @@ type OAuthProvider = {
   authorization_url: string | null;
 };
 
+type OAuthRedeemResponse = {
+  user: AuthUser;
+  lessons: SavedLesson[];
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const targetLanguages = ["English", "Turkish", "Spanish", "French", "German", "Italian"];
@@ -167,13 +172,39 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("reset_token");
     const oauth = params.get("oauth");
+    const handoff = params.get("handoff");
     if (token) {
       setResetToken(token);
       setAuthMode("reset");
       setAuthMessage("Choose a new password to finish resetting your account.");
     } else if (oauth === "success") {
-      setAuthMessage("OAuth login completed.");
-      window.history.replaceState({}, "", window.location.pathname);
+      setAuthMessage("Finishing sign-in...");
+      void (async () => {
+        try {
+          const payload = handoff
+            ? await apiJson<OAuthRedeemResponse>("/api/auth/oauth/redeem", {
+                method: "POST",
+                body: JSON.stringify({ handoff })
+              })
+            : {
+                user: (await apiJson<{ user: AuthUser }>("/api/auth/me")).user,
+                lessons: await apiJson<SavedLesson[]>("/api/lessons")
+              };
+          setUser(payload.user);
+          setSavedLessons(payload.lessons);
+          setActiveLessonId(null);
+          setAuthError("");
+          setAuthMessage("Signed in with OAuth.");
+        } catch {
+          setUser(null);
+          setAuthMessage("");
+          setAuthError(
+            "OAuth finished, but this browser did not accept the session. Try again, or use email login."
+          );
+        } finally {
+          window.history.replaceState({}, "", window.location.pathname);
+        }
+      })();
     } else if (oauth === "error") {
       const reason = params.get("reason");
       setAuthError(

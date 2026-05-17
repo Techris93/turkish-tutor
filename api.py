@@ -17,6 +17,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,10 +30,12 @@ from sqlalchemy.orm import Session
 from auth_storage import (
     SESSION_COOKIE_NAME,
     AuthSession,
+    OAuthHandoff,
     OAuthState,
     PasswordResetToken,
     SavedLesson as DBSavedLesson,
     User,
+    create_oauth_handoff,
     create_oauth_state,
     create_password_reset_token,
     create_session,
@@ -178,6 +181,10 @@ class OAuthConfigResponse(BaseModel):
     providers: List[OAuthProvider]
 
 
+class OAuthRedeemRequest(BaseModel):
+    handoff: str
+
+
 class SavedLessonCreate(BaseModel):
     title: str
     result: StudyResponse
@@ -194,6 +201,11 @@ class SavedLessonResponse(BaseModel):
     created_at: str
     updated_at: str
     result: StudyResponse
+
+
+class OAuthRedeemResponse(BaseModel):
+    user: UserResponse
+    lessons: List[SavedLessonResponse]
 
 
 GEMINI_STATE: Dict[str, Any] = {
@@ -365,6 +377,11 @@ def public_api_url(request: Request, path: str) -> str:
     if base:
         return f"{base}{path}"
     return str(request.url_for("health")).removesuffix("/api/health") + path
+
+
+def redirect_with_params(url: str, params: Dict[str, str]) -> str:
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}{urlencode(params)}"
 
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -689,10 +706,42 @@ async def oauth_callback(
         else:
             db.refresh(user)
 
+    handoff = create_oauth_handoff(db, user)
     token = create_session(db, user)
-    redirect = RedirectResponse(oauth_success_redirect_url(), status_code=302)
+    redirect = RedirectResponse(
+        redirect_with_params(oauth_success_redirect_url(), {"handoff": handoff}),
+        status_code=302,
+    )
     set_session_cookie(redirect, token)
     return redirect
+
+
+@app.post("/api/auth/oauth/redeem", response_model=OAuthRedeemResponse)
+async def oauth_redeem(
+    payload: OAuthRedeemRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> OAuthRedeemResponse:
+    rate_limit(request, "oauth_redeem", RateLimitRule(20, 3600))
+    handoff = db.get(OAuthHandoff, hash_token(payload.handoff))
+    if handoff is None or handoff.used_at is not None or is_expired(handoff.expires_at):
+        raise HTTPException(status_code=400, detail="OAuth sign-in could not be verified.")
+
+    user = db.get(User, handoff.user_id)
+    if user is None:
+        raise HTTPException(status_code=400, detail="OAuth sign-in could not be verified.")
+
+    handoff.used_at = utcnow()
+    db.commit()
+    token = create_session(db, user)
+    set_session_cookie(response, token)
+    lessons = db.scalars(
+        select(DBSavedLesson)
+        .where(DBSavedLesson.user_id == user.id)
+        .order_by(DBSavedLesson.updated_at.desc())
+    ).all()
+    return OAuthRedeemResponse(user=user_response(user), lessons=[lesson_response(lesson) for lesson in lessons])
 
 
 @app.get("/api/lessons", response_model=List[SavedLessonResponse])

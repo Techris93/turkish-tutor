@@ -203,6 +203,7 @@ GITHUB_OAUTH_CLIENT_SECRET=
 GITHUB_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/api/auth/oauth/github/callback
 OAUTH_SUCCESS_REDIRECT_URL=http://localhost:3000/?oauth=success
 OAUTH_ERROR_REDIRECT_URL=http://localhost:3000/?oauth=error
+OAUTH_HANDOFF_MINUTES=5
 ```
 
 For Render, use:
@@ -215,6 +216,8 @@ OAUTH_ERROR_REDIRECT_URL=https://turkish-tutor-web.onrender.com/?oauth=error
 ```
 
 OAuth links accounts by verified/provider email. If the email already exists, the OAuth login uses the existing account; otherwise it creates a new account.
+
+After the provider callback, the API redirects the web app with a short-lived one-time handoff code. The frontend redeems that code, confirms `/api/auth/me`, loads saved lessons, and only then shows OAuth success. This avoids a misleading “OAuth login completed” state when a browser does not accept the session cookie. Handoff codes are stored hashed, expire quickly, and can be used only once.
 
 ### Rate Limiting
 

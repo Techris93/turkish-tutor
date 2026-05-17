@@ -43,6 +43,12 @@ import {
   wordPlaybackQueue,
   wordSegments
 } from "../lib/learning";
+import {
+  consumeOAuthRememberPreference,
+  getStoredSessionToken,
+  storeOAuthRememberPreference,
+  storeSessionToken as persistSessionToken
+} from "../lib/authTokens";
 
 type HealthResponse = {
   ok: boolean;
@@ -87,7 +93,6 @@ type OAuthRedeemResponse = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const SESSION_TOKEN_KEY = "turkce-hoca.session-token.v1";
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const targetLanguages = ["English", "Turkish", "Spanish", "French", "German", "Italian"];
 
@@ -95,18 +100,14 @@ function getSessionToken() {
   if (typeof window === "undefined") {
     return "";
   }
-  return window.sessionStorage.getItem(SESSION_TOKEN_KEY) ?? "";
+  return getStoredSessionToken(window.sessionStorage, window.localStorage);
 }
 
-function storeSessionToken(token?: string | null) {
+function storeSessionToken(token?: string | null, remember = false) {
   if (typeof window === "undefined") {
     return;
   }
-  if (token) {
-    window.sessionStorage.setItem(SESSION_TOKEN_KEY, token);
-  } else {
-    window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
-  }
+  persistSessionToken(window.sessionStorage, window.localStorage, token, remember);
 }
 
 function authHeaders(): Record<string, string> {
@@ -172,6 +173,7 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authName, setAuthName] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [resetToken, setResetToken] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -249,6 +251,7 @@ export default function Home() {
     } else if (oauth === "success") {
       setAuthMessage("Finishing sign-in...");
       void (async () => {
+        const rememberOAuth = consumeOAuthRememberPreference(window.localStorage);
         try {
           const payload = handoff
             ? await apiJson<OAuthRedeemResponse>("/api/auth/oauth/redeem", {
@@ -260,12 +263,12 @@ export default function Home() {
                 lessons: await apiJson<SavedLesson[]>("/api/lessons"),
                 session_token: null
               };
-          storeSessionToken(payload.session_token);
+          storeSessionToken(payload.session_token, rememberOAuth);
           setUser(payload.user);
           setSavedLessons(payload.lessons);
           setActiveLessonId(null);
           setAuthError("");
-          setAuthMessage("Signed in with OAuth.");
+          setAuthMessage(rememberOAuth ? "Signed in with OAuth. This device will remember you." : "Signed in with OAuth.");
         } catch {
           setUser(null);
           setAuthMessage("");
@@ -277,6 +280,7 @@ export default function Home() {
         }
       })();
     } else if (oauth === "error") {
+      consumeOAuthRememberPreference(window.localStorage);
       const reason = params.get("reason");
       setAuthError(
         reason === "account_mismatch"
@@ -824,10 +828,18 @@ export default function Home() {
           name: authName
         })
       });
-      storeSessionToken(payload.session_token);
+      storeSessionToken(payload.session_token, rememberMe);
       setUser(payload.user);
       setAuthPassword("");
-      setAuthMessage(authMode === "signup" ? "Account created." : "Logged in.");
+      setAuthMessage(
+        rememberMe
+          ? authMode === "signup"
+            ? "Account created. This device will remember you."
+            : "Logged in. This device will remember you."
+          : authMode === "signup"
+            ? "Account created."
+            : "Logged in."
+      );
       await loadRemoteLessons();
       setActiveLessonId(null);
     } catch (caught) {
@@ -885,6 +897,7 @@ export default function Home() {
     if (!provider.authorization_url) {
       return;
     }
+    storeOAuthRememberPreference(window.localStorage, rememberMe);
     window.location.href = provider.authorization_url;
   }
 
@@ -1245,6 +1258,21 @@ export default function Home() {
                         onChange={(event) => setResetToken(event.target.value)}
                       />
                     </div>
+                  ) : null}
+
+                  {authMode !== "reset" ? (
+                    <label className="check-row" htmlFor="remember-me">
+                      <input
+                        checked={rememberMe}
+                        id="remember-me"
+                        type="checkbox"
+                        onChange={(event) => setRememberMe(event.target.checked)}
+                      />
+                      <span>
+                        <strong>Remember me</strong>
+                        <small>Only use this on your own device.</small>
+                      </span>
+                    </label>
                   ) : null}
 
                   <button className="primary-button" disabled={authLoading} type="submit">

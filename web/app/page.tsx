@@ -4,7 +4,10 @@ import {
   BookOpen,
   FileText,
   Headphones,
+  KeyRound,
   Loader2,
+  LogIn,
+  LogOut,
   Pause,
   Play,
   RefreshCw,
@@ -12,6 +15,7 @@ import {
   Send,
   Square,
   Trash2,
+  UserPlus,
   Upload
 } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
@@ -38,9 +42,41 @@ type HealthResponse = {
   error: string;
 };
 
+type AuthUser = {
+  id: string;
+  email: string;
+  name: string;
+  created_at: string;
+};
+
+type AuthMode = "login" | "signup" | "reset";
+
+type OAuthProvider = {
+  provider: string;
+  configured: boolean;
+  authorization_url: string | null;
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const targetLanguages = ["English", "Turkish", "Spanish", "French", "German", "Italian"];
+
+async function apiJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    cache: "no-store",
+    credentials: "include",
+    ...options,
+    headers: {
+      ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(options.headers ?? {})
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.message || "Request failed.");
+  }
+  return payload as T;
+}
 
 export default function Home() {
   const [text, setText] = useState("Merhaba, bugün Türkçe öğreniyorum.");
@@ -59,8 +95,21 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("bilingual");
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [savedLessons, setSavedLessons] = useState<SavedLesson[]>([]);
+  const [localLessons, setLocalLessons] = useState<SavedLesson[]>([]);
   const [lessonsLoaded, setLessonsLoaded] = useState(false);
+  const [lessonsLoading, setLessonsLoading] = useState(false);
+  const [lessonError, setLessonError] = useState("");
   const [lessonTitle, setLessonTitle] = useState("");
   const [lessonSearch, setLessonSearch] = useState("");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
@@ -107,7 +156,9 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    setSavedLessons(deserializeLessons(window.localStorage.getItem(SAVED_LESSONS_KEY)));
+    const local = deserializeLessons(window.localStorage.getItem(SAVED_LESSONS_KEY));
+    setLocalLessons(local);
+    setSavedLessons(local);
     setLessonsLoaded(true);
   }, []);
 
@@ -115,8 +166,50 @@ export default function Home() {
     if (!lessonsLoaded) {
       return;
     }
-    window.localStorage.setItem(SAVED_LESSONS_KEY, serializeLessons(savedLessons));
-  }, [lessonsLoaded, savedLessons]);
+    window.localStorage.setItem(SAVED_LESSONS_KEY, serializeLessons(localLessons));
+  }, [lessonsLoaded, localLessons]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAccount() {
+      try {
+        const payload = await apiJson<{ user: AuthUser }>("/api/auth/me");
+        if (!cancelled) {
+          setUser(payload.user);
+          await loadRemoteLessons();
+          setActiveLessonId(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setUser(null);
+        }
+      }
+    }
+    loadAccount();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadOAuth() {
+      try {
+        const payload = await apiJson<{ providers: OAuthProvider[] }>("/api/auth/oauth/config");
+        if (!cancelled) {
+          setOauthProviders(payload.providers);
+        }
+      } catch {
+        if (!cancelled) {
+          setOauthProviders([]);
+        }
+      }
+    }
+    loadOAuth();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!("speechSynthesis" in window)) {
@@ -190,6 +283,7 @@ export default function Home() {
       const response = await fetch(`${API_URL}/api/study`, {
         method: "POST",
         cache: "no-store",
+        credentials: "include",
         body
       });
       const payload = await response.json();
@@ -279,22 +373,152 @@ export default function Home() {
     speakTexts([readableText]);
   }
 
-  function saveLesson() {
+  async function loadRemoteLessons() {
+    setLessonsLoading(true);
+    setLessonError("");
+    try {
+      const lessons = await apiJson<SavedLesson[]>("/api/lessons");
+      setSavedLessons(lessons);
+    } catch (caught) {
+      setLessonError(caught instanceof Error ? caught.message : "Could not load saved lessons.");
+    } finally {
+      setLessonsLoading(false);
+    }
+  }
+
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthLoading(true);
+    setAuthError("");
+    setAuthMessage("");
+    try {
+      if (authMode === "reset") {
+        if (resetToken.trim()) {
+          await apiJson<{ ok: boolean }>("/api/auth/password-reset/confirm", {
+            method: "POST",
+            body: JSON.stringify({ token: resetToken.trim(), password: authPassword })
+          });
+          setAuthMessage("Password updated. You can log in now.");
+          setResetToken("");
+          setAuthPassword("");
+          setAuthMode("login");
+        } else {
+          const payload = await apiJson<{ message: string; reset_token?: string | null }>(
+            "/api/auth/password-reset/request",
+            {
+              method: "POST",
+              body: JSON.stringify({ email: authEmail })
+            }
+          );
+          setAuthMessage(payload.reset_token ? `${payload.message} Dev token: ${payload.reset_token}` : payload.message);
+        }
+        return;
+      }
+
+      const path = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+      const payload = await apiJson<{ user: AuthUser }>(path, {
+        method: "POST",
+        body: JSON.stringify({
+          email: authEmail,
+          password: authPassword,
+          name: authName
+        })
+      });
+      setUser(payload.user);
+      setAuthPassword("");
+      setAuthMessage(authMode === "signup" ? "Account created." : "Logged in.");
+      await loadRemoteLessons();
+      setActiveLessonId(null);
+    } catch (caught) {
+      setAuthError(caught instanceof Error ? caught.message : "Authentication failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function logout() {
+    setAuthLoading(true);
+    setAuthError("");
+    setAuthMessage("");
+    try {
+      await apiJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+      setUser(null);
+      setSavedLessons(localLessons);
+      setActiveLessonId(null);
+      setAuthMessage("Logged out. Local draft lessons are still available in this browser.");
+    } catch (caught) {
+      setAuthError(caught instanceof Error ? caught.message : "Logout failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function importLocalLessons() {
+    if (!user || localLessons.length === 0) {
+      return;
+    }
+    setLessonsLoading(true);
+    setLessonError("");
+    try {
+      const imported: SavedLesson[] = [];
+      for (const lesson of localLessons) {
+        const saved = await apiJson<SavedLesson>("/api/lessons", {
+          method: "POST",
+          body: JSON.stringify({ title: lesson.title, result: lesson.result })
+        });
+        imported.push(saved);
+      }
+      setLocalLessons([]);
+      window.localStorage.removeItem(SAVED_LESSONS_KEY);
+      await loadRemoteLessons();
+      setAuthMessage(`Imported ${imported.length} local lesson${imported.length === 1 ? "" : "s"} into your account.`);
+    } catch (caught) {
+      setLessonError(caught instanceof Error ? caught.message : "Could not import local lessons.");
+    } finally {
+      setLessonsLoading(false);
+    }
+  }
+
+  async function saveLesson() {
     if (!result) {
       return;
     }
-    const baseLesson =
-      activeLessonId && savedLessons.find((lesson) => lesson.id === activeLessonId)
-        ? { ...savedLessons.find((lesson) => lesson.id === activeLessonId)!, result }
-        : createSavedLesson(result, lessonTitle || undefined);
-    const lesson = {
-      ...baseLesson,
-      title: (lessonTitle || baseLesson.title).trim(),
-      result
-    };
-    setSavedLessons((current) => upsertLesson(current, lesson));
-    setActiveLessonId(lesson.id);
-    setLessonTitle(lesson.title);
+    const title = (lessonTitle || defaultLessonTitle(result)).trim();
+    setLessonError("");
+    try {
+      if (user) {
+        const existing = activeLessonId ? savedLessons.find((lesson) => lesson.id === activeLessonId) : null;
+        const saved = existing
+          ? await apiJson<SavedLesson>(`/api/lessons/${existing.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ title, result })
+            })
+          : await apiJson<SavedLesson>("/api/lessons", {
+              method: "POST",
+              body: JSON.stringify({ title, result })
+            });
+        setSavedLessons((current) => upsertLesson(current, saved));
+        setActiveLessonId(saved.id);
+        setLessonTitle(saved.title);
+        return;
+      }
+
+      const baseLesson =
+        activeLessonId && savedLessons.find((lesson) => lesson.id === activeLessonId)
+          ? { ...savedLessons.find((lesson) => lesson.id === activeLessonId)!, result }
+          : createSavedLesson(result, title);
+      const lesson = {
+        ...baseLesson,
+        title,
+        result
+      };
+      setLocalLessons((current) => upsertLesson(current, lesson));
+      setSavedLessons((current) => upsertLesson(current, lesson));
+      setActiveLessonId(lesson.id);
+      setLessonTitle(lesson.title);
+    } catch (caught) {
+      setLessonError(caught instanceof Error ? caught.message : "Could not save lesson.");
+    }
   }
 
   function openLesson(lesson: SavedLesson) {
@@ -309,28 +533,49 @@ export default function Home() {
     setError("");
   }
 
-  function renameLesson(lesson: SavedLesson, title: string) {
+  async function renameLesson(lesson: SavedLesson, title: string) {
     const trimmed = title.trim();
     if (!trimmed) {
       return;
     }
-    setSavedLessons((current) =>
-      current.map((item) =>
-        item.id === lesson.id ? { ...item, title: trimmed, updated_at: new Date().toISOString() } : item
-      )
-    );
-    if (activeLessonId === lesson.id) {
-      setLessonTitle(trimmed);
+    setLessonError("");
+    try {
+      if (user) {
+        const saved = await apiJson<SavedLesson>(`/api/lessons/${lesson.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ title: trimmed })
+        });
+        setSavedLessons((current) => upsertLesson(current, saved));
+      } else {
+        const renamed = { ...lesson, title: trimmed, updated_at: new Date().toISOString() };
+        setLocalLessons((current) => upsertLesson(current, renamed));
+        setSavedLessons((current) => upsertLesson(current, renamed));
+      }
+      if (activeLessonId === lesson.id) {
+        setLessonTitle(trimmed);
+      }
+    } catch (caught) {
+      setLessonError(caught instanceof Error ? caught.message : "Could not rename lesson.");
     }
   }
 
-  function deleteLesson(lesson: SavedLesson) {
+  async function deleteLesson(lesson: SavedLesson) {
     if (!window.confirm(`Delete saved lesson "${lesson.title}"?`)) {
       return;
     }
-    setSavedLessons((current) => current.filter((item) => item.id !== lesson.id));
-    if (activeLessonId === lesson.id) {
-      setActiveLessonId(null);
+    setLessonError("");
+    try {
+      if (user) {
+        await apiJson<{ ok: boolean }>(`/api/lessons/${lesson.id}`, { method: "DELETE" });
+      } else {
+        setLocalLessons((current) => current.filter((item) => item.id !== lesson.id));
+      }
+      setSavedLessons((current) => current.filter((item) => item.id !== lesson.id));
+      if (activeLessonId === lesson.id) {
+        setActiveLessonId(null);
+      }
+    } catch (caught) {
+      setLessonError(caught instanceof Error ? caught.message : "Could not delete lesson.");
     }
   }
 
@@ -468,12 +713,155 @@ export default function Home() {
           <section className="panel">
             <div className="panel-header">
               <div className="panel-title">
+                {user ? <KeyRound size={18} /> : authMode === "signup" ? <UserPlus size={18} /> : <LogIn size={18} />}
+                <h2>{user ? "Account" : "Sign In"}</h2>
+              </div>
+            </div>
+            <div className="panel-body">
+              {user ? (
+                <div className="account-box">
+                  <div>
+                    <strong>{user.name}</strong>
+                    <span>{user.email}</span>
+                  </div>
+                  <button className="ghost-button" disabled={authLoading} type="button" onClick={logout}>
+                    <LogOut size={18} />
+                    Logout
+                  </button>
+                </div>
+              ) : (
+                <form className="auth-form" onSubmit={submitAuth}>
+                  <div className="auth-tabs">
+                    <button
+                      className={authMode === "login" ? "active" : ""}
+                      type="button"
+                      onClick={() => setAuthMode("login")}
+                    >
+                      Login
+                    </button>
+                    <button
+                      className={authMode === "signup" ? "active" : ""}
+                      type="button"
+                      onClick={() => setAuthMode("signup")}
+                    >
+                      Sign up
+                    </button>
+                    <button
+                      className={authMode === "reset" ? "active" : ""}
+                      type="button"
+                      onClick={() => setAuthMode("reset")}
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  {authMode === "signup" ? (
+                    <div className="field compact-field">
+                      <label htmlFor="auth-name">Name</label>
+                      <input
+                        id="auth-name"
+                        type="text"
+                        autoComplete="name"
+                        value={authName}
+                        onChange={(event) => setAuthName(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+
+                  <div className="auth-grid">
+                    <div className="field compact-field">
+                      <label htmlFor="auth-email">Email</label>
+                      <input
+                        id="auth-email"
+                        type="email"
+                        autoComplete="email"
+                        value={authEmail}
+                        onChange={(event) => setAuthEmail(event.target.value)}
+                      />
+                    </div>
+                    <div className="field compact-field">
+                      <label htmlFor="auth-password">
+                        {authMode === "reset" && resetToken ? "New password" : "Password"}
+                      </label>
+                      <input
+                        id="auth-password"
+                        type="password"
+                        autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                        value={authPassword}
+                        onChange={(event) => setAuthPassword(event.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {authMode === "reset" ? (
+                    <div className="field compact-field">
+                      <label htmlFor="reset-token">Reset token</label>
+                      <input
+                        id="reset-token"
+                        type="text"
+                        placeholder="Paste token after email delivery is configured"
+                        value={resetToken}
+                        onChange={(event) => setResetToken(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+
+                  <button className="primary-button" disabled={authLoading} type="submit">
+                    {authLoading ? <Loader2 className="spin" size={18} /> : <KeyRound size={18} />}
+                    {authMode === "signup" ? "Create account" : authMode === "reset" && !resetToken ? "Request reset" : "Continue"}
+                  </button>
+                </form>
+              )}
+
+              {oauthProviders.length ? (
+                <div className="oauth-row">
+                  {oauthProviders.map((provider) => (
+                    <button
+                      className="ghost-button"
+                      disabled={!provider.authorization_url}
+                      key={provider.provider}
+                      type="button"
+                      title={
+                        provider.authorization_url
+                          ? `Continue with ${provider.provider}.`
+                          : provider.configured
+                            ? `${provider.provider} credentials are configured; callback routes still need to be wired.`
+                          : `${provider.provider} OAuth is not configured yet.`
+                      }
+                    >
+                      {provider.provider} OAuth
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {authError ? <div className="error">{authError}</div> : null}
+              {authMessage ? <div className="success">{authMessage}</div> : null}
+              {!user ? (
+                <p className="muted-copy">
+                  Sign in to sync saved lessons across refreshes and devices. Local lessons stay available until you import them.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
                 <BookOpen size={18} />
                 <h2>Saved Lessons</h2>
               </div>
-              <strong>{savedLessons.length}</strong>
+              <strong>{lessonsLoading ? "..." : savedLessons.length}</strong>
             </div>
             <div className="panel-body">
+              {user && localLessons.length ? (
+                <div className="revision-banner">
+                  You have {localLessons.length} local lesson{localLessons.length === 1 ? "" : "s"} from this browser.
+                  <button className="inline-button" disabled={lessonsLoading} type="button" onClick={importLocalLessons}>
+                    Import to account
+                  </button>
+                </div>
+              ) : null}
               <div className="lesson-save-row">
                 <input
                   aria-label="Lesson title"
@@ -487,6 +875,10 @@ export default function Home() {
                   {activeLessonId ? "Update" : "Save"}
                 </button>
               </div>
+              {lessonError ? <div className="error">{lessonError}</div> : null}
+              {!user ? (
+                <p className="muted-copy">Not signed in: lessons are saved only in this browser until you log in.</p>
+              ) : null}
               <div className="search-box lesson-search">
                 <Search size={16} />
                 <input
@@ -537,7 +929,11 @@ export default function Home() {
                   ))}
                 </div>
               ) : (
-                <p className="muted-copy">Saved lessons stay in this browser for later revision.</p>
+                <p className="muted-copy">
+                  {user
+                    ? "Saved lessons from your account will appear here."
+                    : "Local saved lessons stay in this browser. Sign in to keep them across devices."}
+                </p>
               )}
             </div>
           </section>

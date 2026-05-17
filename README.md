@@ -17,7 +17,8 @@ An adaptive AI language tutor for Turkish, powered by Google Gemini. Uses the **
 - 🌍 **Translation + CEFR examples** — translates extracted words/phrases/sentences and generates A1-C2 practice lines
 - 🧾 **Vocabulary cards from photos** — splits OCR tables into individual words/phrases, preserves compounds, and creates one translated example card per item
 - 🔊 **Bilingual text-to-speech** — reads Turkish words/examples alone, translations alone, or Turkish followed by the translation
-- 💾 **Saved web lessons** — saves generated study sessions locally so learners can revisit and revise them later
+- 💾 **Account saved lessons** — saves generated study sessions to a user account so learners can revisit and revise them later
+- 🔐 **Email/password authentication** — sign up, log in, log out, and use a password-reset-ready flow
 - 🤖 **Autoresearch loop** — AI agents experiment with different teaching strategies to improve scores
 - 📊 **Evaluation pipeline** — 4-metric scoring: accuracy, pedagogy, Turkish correctness, composite
 
@@ -69,14 +70,35 @@ The frontend calls `http://127.0.0.1:8000` by default. To use a different API UR
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, structured vocabulary cards, browser text-to-speech controls, and saved lessons.
+The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, structured vocabulary cards, browser text-to-speech controls, authentication, and account-backed saved lessons.
+
+### Local Auth And Database Setup
+
+Saved lessons are stored through the FastAPI backend. Local development uses SQLite by default:
+
+```bash
+DATABASE_URL=sqlite:///data/turkish_tutor.sqlite3
+AUTH_COOKIE_SECURE=false
+AUTH_COOKIE_SAMESITE=lax
+```
+
+The API creates the required tables at startup. User passwords are hashed with Argon2. Browser sessions use HTTP-only cookies, so the frontend must call the API with credentials enabled.
+
+For a local password-reset test, set:
+
+```bash
+PASSWORD_RESET_RETURN_TOKEN=true
+```
+
+This returns the reset token in the API response for development only. In production, configure an email provider such as `SMTP_HOST` or `RESEND_API_KEY` before exposing password reset to real users.
 
 ## Deploy On Render
 
-This repo includes a Render Blueprint in `render.yaml` with two services:
+This repo includes a Render Blueprint in `render.yaml` with two services and one Postgres database:
 
 - `turkish-tutor-api`: FastAPI backend built from `Dockerfile.api`. Docker is used so image OCR has the required `tesseract-ocr`, English, and Turkish language packages.
 - `turkish-tutor-web`: Next.js frontend exported as a static site from `web/out`.
+- `turkish-tutor-db`: Render Postgres database for users, sessions, password reset tokens, and saved lessons.
 
 Deploy steps:
 
@@ -86,10 +108,12 @@ Deploy steps:
 3. Select the pushed branch, usually `main`.
 4. Fill the required secret env var for `turkish-tutor-api`:
    - `GEMINI_API_KEY`
-5. Apply the Blueprint and wait for both services to deploy.
+5. Apply the Blueprint and wait for the API, web service, and database to deploy.
 6. Open `https://turkish-tutor-web.onrender.com`.
 
-The frontend is configured with `NEXT_PUBLIC_API_URL=https://turkish-tutor-api.onrender.com`, and the API allows CORS from `https://turkish-tutor-web.onrender.com`. If you rename either service in Render, update those two values in `render.yaml`.
+The frontend is configured with `NEXT_PUBLIC_API_URL=https://turkish-tutor-api.onrender.com`, and the API allows CORS from `https://turkish-tutor-web.onrender.com`. The API receives `DATABASE_URL` from the Blueprint-managed Postgres database, and production cookies use `AUTH_COOKIE_SECURE=true` plus `AUTH_COOKIE_SAMESITE=none`. If you rename services in Render, update those values in `render.yaml`.
+
+Render syncs `sync: false` secrets only during initial Blueprint creation. If you add OAuth or email-provider secrets later, set them manually in the Render Dashboard.
 
 Render CLI validation, if installed and authenticated:
 
@@ -119,16 +143,46 @@ In the frontend, use:
 
 Browser text-to-speech uses `SpeechSynthesis`. The app tries to use a Turkish voice for Turkish segments and a target-language voice for translations. Available voices vary by browser and operating system, so install system voices if pronunciation quality is limited.
 
-### Saved Lessons
+### Saved Lessons And Accounts
 
 The web app can save the current study result as a lesson:
 
 - Enter or edit a lesson title in the `Saved Lessons` panel.
-- Click `Save` to store the current extracted text, study note, CEFR level, target language, source details, and vocabulary cards.
+- Sign up or log in to save lessons to your account.
+- Click `Save` to store the current extracted text, study note, CEFR level, target language, source details, and vocabulary cards in the backend database.
 - Use the saved lesson list to reopen a lesson without uploading the image again or calling Gemini again.
 - Rename or delete saved lessons from the lesson list. Delete asks for confirmation first.
+- If older browser-only lessons exist in `localStorage`, log in and use `Import to account` to copy them into persistent storage.
 
-Saved lessons are stored in the browser's `localStorage` under `turkce-hoca.saved-lessons.v1`. They survive refreshes and browser restarts on the same device/browser, but they are not synced across devices and will be removed if site data is cleared.
+When logged in, saved lessons are stored in the backend database and survive refreshes, browser restarts, and device changes for the same account. When logged out, the app can still keep temporary local lessons in the browser's `localStorage` under `turkce-hoca.saved-lessons.v1`, but those local drafts are not synced and can be removed if site data is cleared.
+
+### Authentication
+
+The web app includes:
+
+- Email/password sign-up and login.
+- Logout with server-side session invalidation.
+- Current-user check on app load.
+- HTTP-only cookie sessions stored in the database.
+- Password reset request/confirm endpoints and UI.
+- OAuth-ready provider configuration endpoint for Google and GitHub.
+
+OAuth buttons remain disabled until the matching environment variables are configured:
+
+```bash
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+GITHUB_OAUTH_CLIENT_ID=
+GITHUB_OAUTH_CLIENT_SECRET=
+```
+
+The password reset flow creates secure reset tokens, but it does not pretend to send email unless an email provider is configured. For development only, `PASSWORD_RESET_RETURN_TOKEN=true` returns the token in the response.
+
+Current production limitations:
+
+- OAuth has provider configuration plumbing, but provider callback/login routes still need to be implemented before OAuth sign-in is enabled.
+- Password reset email delivery is a provider-ready stub until SMTP or an email API is wired in.
+- API-level rate limiting is not yet implemented; add it before opening sign-up widely to the public.
 
 After pushing changes to the branch connected to Render, Render should redeploy the API/static web services automatically from the Blueprint.
 
@@ -177,10 +231,11 @@ Text-to-speech uses macOS `say` automatically on macOS, including installed Turk
 
 ```bash
 source .venv/bin/activate
-python -m py_compile api.py tutor.py config.py dataset.py evaluate.py swarm.py content_intelligence.py speech.py vocabulary_cards.py
+python -m py_compile api.py auth_storage.py tutor.py config.py dataset.py evaluate.py swarm.py content_intelligence.py speech.py vocabulary_cards.py
 python -m unittest discover -s tests
 
 cd web
+npm run test
 npm run lint
 npm run build
 ```
@@ -193,6 +248,7 @@ npm run build
 turkish-tutor/
 ├── tutor.py        — Main interactive CLI tutor (Gemini-powered)
 ├── api.py          — FastAPI backend for the web app
+├── auth_storage.py — SQLAlchemy auth, sessions, password reset tokens, and saved lessons
 ├── config.py       — Teaching strategies, CEFR levels, system prompt
 ├── content_intelligence.py — Text/PDF/DOCX/image extraction and CEFR study prompt helpers
 ├── vocabulary_cards.py — Structured vocabulary-card JSON parsing and fallbacks

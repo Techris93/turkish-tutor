@@ -1,14 +1,29 @@
 import unittest
+import os
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 import api
+from auth_storage import configure_database, drop_db, init_db
 
 
 class ApiTests(unittest.TestCase):
     def test_study_returns_structured_vocabulary_cards(self):
-        client = TestClient(api.app)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ["DATABASE_URL"] = f"sqlite:///{Path(tmpdir) / 'api.sqlite3'}"
+            try:
+                configure_database(os.environ["DATABASE_URL"])
+                drop_db()
+                init_db()
+                client = TestClient(api.app)
+                self._assert_study_cards(client)
+            finally:
+                os.environ.pop("DATABASE_URL", None)
+
+    def _assert_study_cards(self, client: TestClient):
         card_json = """
         {
           "cards": [
@@ -57,4 +72,3 @@ class ApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -177,7 +177,9 @@ button:disabled {
 textarea,
 select,
 input[type="file"],
-input[type="text"] {
+input[type="text"],
+input[type="email"],
+input[type="password"] {
   width: 100%;
   border: 1px solid var(--line);
   background: var(--surface-strong);
@@ -196,7 +198,9 @@ textarea {
 textarea:focus,
 select:focus,
 input[type="file"]:focus,
-input[type="text"]:focus {
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus {
   border-color: var(--green);
   box-shadow: 0 0 0 3px rgba(23, 107, 91, 0.14);
 }
@@ -304,6 +308,15 @@ input[type="text"]:focus {
   margin-top: 12px;
 }
 
+.success {
+  border: 1px solid rgba(23, 107, 91, 0.24);
+  background: rgba(23, 107, 91, 0.08);
+  color: var(--green-strong);
+  padding: 12px;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+
 .warning,
 .voice-warning {
   border: 1px solid rgba(166, 95, 0, 0.24);
@@ -322,7 +335,7 @@ input[type="text"]:focus {
 .muted-copy {
   color: var(--muted);
   line-height: 1.45;
-  margin: 0;
+  margin: 12px 0 0;
 }
 
 .revision-banner {
@@ -333,6 +346,88 @@ input[type="text"]:focus {
   border-radius: 8px;
   margin-bottom: 14px;
   line-height: 1.35;
+}
+
+.revision-banner .inline-button {
+  margin-left: 10px;
+}
+
+.account-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.account-box div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.account-box span {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.auth-tabs button {
+  min-height: 38px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.auth-tabs button:last-child {
+  border-right: 0;
+}
+
+.auth-tabs button.active {
+  background: var(--green);
+  color: #fff;
+}
+
+.auth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.compact-field {
+  margin-bottom: 0;
+}
+
+.oauth-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.inline-button {
+  border: 0;
+  background: transparent;
+  color: var(--green-strong);
+  font-weight: 800;
+  min-height: 0;
+  padding: 0;
+  text-decoration: underline;
 }
 
 .meta-grid {
@@ -633,15 +728,21 @@ input[type="range"] {
   .meta-grid,
   .tts-grid,
   .filters,
+  .auth-grid,
   .lesson-save-row,
   .lesson-card {
     grid-template-columns: 1fr;
   }
 
   .vocab-main,
+  .account-box,
   .card-foot,
   .lesson-actions {
     flex-direction: column;
+  }
+
+  .account-box {
+    align-items: stretch;
   }
 
   .lesson-actions {

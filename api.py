@@ -10,16 +10,38 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
+from auth_storage import (
+    SESSION_COOKIE_NAME,
+    AuthSession,
+    PasswordResetToken,
+    SavedLesson as DBSavedLesson,
+    User,
+    create_password_reset_token,
+    create_session,
+    find_user_by_email,
+    get_db,
+    hash_password,
+    hash_token,
+    init_db,
+    isoformat,
+    normalize_email,
+    utcnow,
+    verify_password,
+)
 from config import CEFR_LEVELS, MODEL, retrieve_context
 from content_intelligence import (
     CEFR_LEVELS as CEFR_LEVEL_NAMES,
@@ -87,6 +109,71 @@ class HealthResponse(BaseModel):
     model: str
     topics: int
     error: str = ""
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: str
+    created_at: str
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    user: UserResponse
+
+
+class PasswordResetRequest(BaseModel):
+    email: str
+
+
+class PasswordResetRequestResponse(BaseModel):
+    message: str
+    reset_token: Optional[str] = None
+    email_delivery_configured: bool = False
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str
+    password: str
+
+
+class OAuthProvider(BaseModel):
+    provider: str
+    configured: bool
+    authorization_url: Optional[str] = None
+
+
+class OAuthConfigResponse(BaseModel):
+    providers: List[OAuthProvider]
+
+
+class SavedLessonCreate(BaseModel):
+    title: str
+    result: StudyResponse
+
+
+class SavedLessonUpdate(BaseModel):
+    title: Optional[str] = None
+    result: Optional[StudyResponse] = None
+
+
+class SavedLessonResponse(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    result: StudyResponse
 
 
 GEMINI_STATE: Dict[str, Any] = {
@@ -175,6 +262,106 @@ def allowed_origins() -> List[str]:
     return origins
 
 
+def model_dump(model: BaseModel) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()  # type: ignore[no-any-return]
+    return model.dict()
+
+
+def validate_email(email: str) -> str:
+    normalized = normalize_email(email)
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized):
+        raise HTTPException(status_code=422, detail="Enter a valid email address.")
+    return normalized
+
+
+def validate_password(password: str) -> None:
+    if len(password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters.")
+
+
+def user_response(user: User) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        created_at=isoformat(user.created_at),
+    )
+
+
+def lesson_response(lesson: DBSavedLesson) -> SavedLessonResponse:
+    return SavedLessonResponse(
+        id=lesson.id,
+        title=lesson.title,
+        created_at=isoformat(lesson.created_at),
+        updated_at=isoformat(lesson.updated_at),
+        result=StudyResponse(**lesson.result),
+    )
+
+
+def cookie_secure() -> bool:
+    configured = os.environ.get("AUTH_COOKIE_SECURE")
+    if configured is not None:
+        return configured.lower() in {"1", "true", "yes", "on"}
+    return os.environ.get("RENDER", "").lower() == "true"
+
+
+def cookie_samesite() -> str:
+    value = os.environ.get("AUTH_COOKIE_SAMESITE", "lax").lower()
+    return value if value in {"lax", "strict", "none"} else "lax"
+
+
+def set_session_cookie(response: Response, token: str) -> None:
+    max_age = int(os.environ.get("AUTH_SESSION_DAYS", "30")) * 24 * 60 * 60
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=max_age,
+        httponly=True,
+        secure=cookie_secure(),
+        samesite=cookie_samesite(),  # type: ignore[arg-type]
+        path="/",
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=cookie_secure(),
+        samesite=cookie_samesite(),  # type: ignore[arg-type]
+    )
+
+
+def is_expired(expires_at) -> bool:  # type: ignore[no-untyped-def]
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=utcnow().tzinfo)
+    return expires_at <= utcnow()
+
+
+def current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+
+    auth_session = db.get(AuthSession, hash_token(token))
+    if auth_session is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+
+    if is_expired(auth_session.expires_at):
+        db.delete(auth_session)
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired.")
+
+    user = db.get(User, auth_session.user_id)
+    if user is None:
+        db.delete(auth_session)
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+    return user
+
+
 async def extract_upload(upload: UploadFile, current_level: str) -> ExtractedContent:
     suffix = Path(upload.filename or "upload").suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
@@ -213,6 +400,11 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup() -> None:
+    init_db()
+
+
 @app.get("/api/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     knowledge = load_knowledge()
@@ -244,6 +436,183 @@ async def voices(language: str = "auto") -> Dict[str, Any]:
             for voice in voice_list
         ]
     }
+
+
+@app.post("/api/auth/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+async def signup(payload: SignupRequest, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
+    email = validate_email(payload.email)
+    validate_password(payload.password)
+    name = payload.name.strip() or email.split("@", 1)[0]
+
+    user = User(email=email, name=name, password_hash=hash_password(payload.password))
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="An account with this email already exists.") from exc
+    db.refresh(user)
+    token = create_session(db, user)
+    set_session_cookie(response, token)
+    return AuthResponse(user=user_response(user))
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+async def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
+    email = validate_email(payload.email)
+    user = find_user_by_email(db, email)
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    token = create_session(db, user)
+    set_session_cookie(response, token)
+    return AuthResponse(user=user_response(user))
+
+
+@app.post("/api/auth/logout")
+async def logout(request: Request, response: Response, db: Session = Depends(get_db)) -> Dict[str, bool]:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if token:
+        auth_session = db.get(AuthSession, hash_token(token))
+        if auth_session is not None:
+            db.delete(auth_session)
+            db.commit()
+    clear_session_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me", response_model=AuthResponse)
+async def me(user: User = Depends(current_user)) -> AuthResponse:
+    return AuthResponse(user=user_response(user))
+
+
+@app.post("/api/auth/password-reset/request", response_model=PasswordResetRequestResponse)
+async def request_password_reset(
+    payload: PasswordResetRequest,
+    db: Session = Depends(get_db),
+) -> PasswordResetRequestResponse:
+    email = validate_email(payload.email)
+    user = find_user_by_email(db, email)
+    reset_token = None
+    if user is not None:
+        token = create_password_reset_token(db, user)
+        if os.environ.get("PASSWORD_RESET_RETURN_TOKEN", "").lower() in {"1", "true", "yes"}:
+            reset_token = token
+
+    email_configured = bool(os.environ.get("SMTP_HOST") or os.environ.get("RESEND_API_KEY"))
+    message = (
+        "If an account exists, a reset token was created. Configure SMTP_HOST or RESEND_API_KEY to email it."
+        if not email_configured
+        else "If an account exists, password reset instructions will be sent."
+    )
+    return PasswordResetRequestResponse(
+        message=message,
+        reset_token=reset_token,
+        email_delivery_configured=email_configured,
+    )
+
+
+@app.post("/api/auth/password-reset/confirm")
+async def confirm_password_reset(payload: PasswordResetConfirmRequest, db: Session = Depends(get_db)) -> Dict[str, bool]:
+    validate_password(payload.password)
+    reset = db.get(PasswordResetToken, hash_token(payload.token))
+    if reset is None or reset.used_at is not None or is_expired(reset.expires_at):
+        raise HTTPException(status_code=400, detail="Invalid or expired password reset token.")
+    user = db.get(User, reset.user_id)
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired password reset token.")
+
+    user.password_hash = hash_password(payload.password)
+    reset.used_at = utcnow()
+    db.query(AuthSession).filter(AuthSession.user_id == user.id).delete()
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/auth/oauth/config", response_model=OAuthConfigResponse)
+async def oauth_config() -> OAuthConfigResponse:
+    google_ready = bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID") and os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET"))
+    github_ready = bool(os.environ.get("GITHUB_OAUTH_CLIENT_ID") and os.environ.get("GITHUB_OAUTH_CLIENT_SECRET"))
+    return OAuthConfigResponse(
+        providers=[
+            OAuthProvider(provider="google", configured=google_ready),
+            OAuthProvider(provider="github", configured=github_ready),
+        ]
+    )
+
+
+@app.get("/api/lessons", response_model=List[SavedLessonResponse])
+async def list_lessons(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> List[SavedLessonResponse]:
+    lessons = db.scalars(
+        select(DBSavedLesson)
+        .where(DBSavedLesson.user_id == user.id)
+        .order_by(DBSavedLesson.updated_at.desc())
+    ).all()
+    return [lesson_response(lesson) for lesson in lessons]
+
+
+@app.post("/api/lessons", response_model=SavedLessonResponse, status_code=status.HTTP_201_CREATED)
+async def create_lesson(
+    payload: SavedLessonCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SavedLessonResponse:
+    title = payload.title.strip() or "Turkish lesson"
+    lesson = DBSavedLesson(user_id=user.id, title=title, result=model_dump(payload.result))
+    db.add(lesson)
+    db.commit()
+    db.refresh(lesson)
+    return lesson_response(lesson)
+
+
+@app.get("/api/lessons/{lesson_id}", response_model=SavedLessonResponse)
+async def get_lesson(
+    lesson_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SavedLessonResponse:
+    lesson = db.get(DBSavedLesson, lesson_id)
+    if lesson is None or lesson.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Saved lesson not found.")
+    return lesson_response(lesson)
+
+
+@app.patch("/api/lessons/{lesson_id}", response_model=SavedLessonResponse)
+async def update_lesson(
+    lesson_id: str,
+    payload: SavedLessonUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SavedLessonResponse:
+    lesson = db.get(DBSavedLesson, lesson_id)
+    if lesson is None or lesson.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Saved lesson not found.")
+
+    if payload.title is not None:
+        lesson.title = payload.title.strip() or lesson.title
+    if payload.result is not None:
+        lesson.result = model_dump(payload.result)
+    lesson.updated_at = utcnow()
+    db.commit()
+    db.refresh(lesson)
+    return lesson_response(lesson)
+
+
+@app.delete("/api/lessons/{lesson_id}")
+async def delete_lesson(
+    lesson_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, bool]:
+    lesson = db.get(DBSavedLesson, lesson_id)
+    if lesson is None or lesson.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Saved lesson not found.")
+    db.delete(lesson)
+    db.commit()
+    return {"ok": True}
 
 
 @app.post("/api/study", response_model=StudyResponse)

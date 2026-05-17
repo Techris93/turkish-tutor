@@ -6,6 +6,9 @@ pypdf>=5.0.0
 Pillow>=10.0.0
 pytesseract>=0.3.13
 python-docx>=1.1.0
+SQLAlchemy>=2.0.30
+psycopg[binary]>=3.2.0
+argon2-cffi>=23.1.0
 
 # Optional — for HuggingFace dataset fetching and cross-platform TTS fallback:
 # datasets>=2.18.0

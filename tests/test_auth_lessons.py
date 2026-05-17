@@ -97,6 +97,7 @@ class AuthLessonTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["user"]["email"], "learner@example.com")
+        self.assertTrue(response.json()["session_token"])
 
         duplicate = self.client.post(
             "/api/auth/signup",
@@ -120,7 +121,36 @@ class AuthLessonTests(unittest.TestCase):
             json={"email": "learner@example.com", "password": "password123"},
         )
         self.assertEqual(login.status_code, 200)
+        self.assertTrue(login.json()["session_token"])
         self.assertEqual(login_client.get("/api/auth/me").status_code, 200)
+
+    def test_session_token_header_authenticates_and_logs_out(self):
+        signup = self.client.post(
+            "/api/auth/signup",
+            json={"email": "header@example.com", "password": "password123", "name": "Header User"},
+        )
+        self.assertEqual(signup.status_code, 201)
+        token = signup.json()["session_token"]
+        headers = {"X-Session-Token": token}
+
+        header_client = TestClient(api.app)
+        current = header_client.get("/api/auth/me", headers=headers)
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.json()["user"]["email"], "header@example.com")
+
+        created = header_client.post(
+            "/api/lessons",
+            headers=headers,
+            json={"title": "Header lesson", "result": study_result()},
+        )
+        self.assertEqual(created.status_code, 201)
+        listed = header_client.get("/api/lessons", headers=headers)
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()), 1)
+
+        logout = header_client.post("/api/auth/logout", headers=headers)
+        self.assertEqual(logout.status_code, 200)
+        self.assertEqual(header_client.get("/api/auth/me", headers=headers).status_code, 401)
 
     def test_password_reset_token_updates_password(self):
         signed_in = self.signup()
@@ -255,7 +285,21 @@ class AuthLessonTests(unittest.TestCase):
         redeemed = redeem_client.post("/api/auth/oauth/redeem", json={"handoff": handoff})
         self.assertEqual(redeemed.status_code, 200)
         self.assertEqual(redeemed.json()["user"]["email"], "oauth@example.com")
+        session_token = redeemed.json()["session_token"]
+        self.assertTrue(session_token)
         self.assertEqual(redeem_client.get("/api/auth/me").status_code, 200)
+
+        header_client = TestClient(api.app)
+        headers = {"X-Session-Token": session_token}
+        self.assertEqual(header_client.get("/api/auth/me", headers=headers).status_code, 200)
+        saved = header_client.post(
+            "/api/lessons",
+            headers=headers,
+            json={"title": "OAuth saved lesson", "result": study_result()},
+        )
+        self.assertEqual(saved.status_code, 201)
+        self.assertEqual(len(header_client.get("/api/lessons", headers=headers).json()), 1)
+
         reused_handoff = TestClient(api.app).post("/api/auth/oauth/redeem", json={"handoff": handoff})
         self.assertEqual(reused_handoff.status_code, 400)
 

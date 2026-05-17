@@ -154,6 +154,7 @@ class LoginRequest(BaseModel):
 
 class AuthResponse(BaseModel):
     user: UserResponse
+    session_token: Optional[str] = None
 
 
 class PasswordResetRequest(BaseModel):
@@ -206,6 +207,7 @@ class SavedLessonResponse(BaseModel):
 class OAuthRedeemResponse(BaseModel):
     user: UserResponse
     lessons: List[SavedLessonResponse]
+    session_token: str
 
 
 GEMINI_STATE: Dict[str, Any] = {
@@ -384,11 +386,11 @@ def redirect_with_params(url: str, params: Dict[str, str]) -> str:
     return f"{url}{separator}{urlencode(params)}"
 
 
-def current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+def request_session_token(request: Request) -> Optional[str]:
+    return request.cookies.get(SESSION_COOKIE_NAME) or request.headers.get("x-session-token")
 
+
+def authenticate_session_token(token: str, db: Session) -> User:
     auth_session = db.get(AuthSession, hash_token(token))
     if auth_session is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
@@ -406,23 +408,21 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+def current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    token = request_session_token(request)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+    return authenticate_session_token(token, db)
+
+
 def optional_current_user(request: Request, db: Session) -> Optional[User]:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
+    token = request_session_token(request)
     if not token:
         return None
-    auth_session = db.get(AuthSession, hash_token(token))
-    if auth_session is None:
+    try:
+        return authenticate_session_token(token, db)
+    except HTTPException:
         return None
-    if is_expired(auth_session.expires_at):
-        db.delete(auth_session)
-        db.commit()
-        return None
-    user = db.get(User, auth_session.user_id)
-    if user is None:
-        db.delete(auth_session)
-        db.commit()
-        return None
-    return user
 
 
 async def extract_upload(upload: UploadFile, current_level: str) -> ExtractedContent:
@@ -523,7 +523,7 @@ async def signup(
     db.refresh(user)
     token = create_session(db, user)
     set_session_cookie(response, token)
-    return AuthResponse(user=user_response(user))
+    return AuthResponse(user=user_response(user), session_token=token)
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
@@ -541,12 +541,12 @@ async def login(
 
     token = create_session(db, user)
     set_session_cookie(response, token)
-    return AuthResponse(user=user_response(user))
+    return AuthResponse(user=user_response(user), session_token=token)
 
 
 @app.post("/api/auth/logout")
 async def logout(request: Request, response: Response, db: Session = Depends(get_db)) -> Dict[str, bool]:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
+    token = request_session_token(request)
     if token:
         auth_session = db.get(AuthSession, hash_token(token))
         if auth_session is not None:
@@ -741,7 +741,11 @@ async def oauth_redeem(
         .where(DBSavedLesson.user_id == user.id)
         .order_by(DBSavedLesson.updated_at.desc())
     ).all()
-    return OAuthRedeemResponse(user=user_response(user), lessons=[lesson_response(lesson) for lesson in lessons])
+    return OAuthRedeemResponse(
+        user=user_response(user),
+        lessons=[lesson_response(lesson) for lesson in lessons],
+        session_token=token,
+    )
 
 
 @app.get("/api/lessons", response_model=List[SavedLessonResponse])

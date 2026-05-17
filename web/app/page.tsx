@@ -49,6 +49,11 @@ type AuthUser = {
   created_at: string;
 };
 
+type AuthResponse = {
+  user: AuthUser;
+  session_token?: string | null;
+};
+
 type AuthMode = "login" | "signup" | "reset";
 
 type OAuthProvider = {
@@ -60,21 +65,52 @@ type OAuthProvider = {
 type OAuthRedeemResponse = {
   user: AuthUser;
   lessons: SavedLesson[];
+  session_token: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const SESSION_TOKEN_KEY = "turkce-hoca.session-token.v1";
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const targetLanguages = ["English", "Turkish", "Spanish", "French", "German", "Italian"];
 
+function getSessionToken() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return window.sessionStorage.getItem(SESSION_TOKEN_KEY) ?? "";
+}
+
+function storeSessionToken(token?: string | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (token) {
+    window.sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+  } else {
+    window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getSessionToken();
+  return token ? { "X-Session-Token": token } : {};
+}
+
 async function apiJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (!(options.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const token = getSessionToken();
+  if (token) {
+    headers.set("X-Session-Token", token);
+  }
+
   const response = await fetch(`${API_URL}${path}`, {
     cache: "no-store",
     credentials: "include",
     ...options,
-    headers: {
-      ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-      ...(options.headers ?? {})
-    }
+    headers
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -187,9 +223,11 @@ export default function Home() {
                 body: JSON.stringify({ handoff })
               })
             : {
-                user: (await apiJson<{ user: AuthUser }>("/api/auth/me")).user,
-                lessons: await apiJson<SavedLesson[]>("/api/lessons")
+                user: (await apiJson<AuthResponse>("/api/auth/me")).user,
+                lessons: await apiJson<SavedLesson[]>("/api/lessons"),
+                session_token: null
               };
+          storeSessionToken(payload.session_token);
           setUser(payload.user);
           setSavedLessons(payload.lessons);
           setActiveLessonId(null);
@@ -227,7 +265,7 @@ export default function Home() {
     let cancelled = false;
     async function loadAccount() {
       try {
-        const payload = await apiJson<{ user: AuthUser }>("/api/auth/me");
+        const payload = await apiJson<AuthResponse>("/api/auth/me");
         if (!cancelled) {
           setUser(payload.user);
           const lessons = await apiJson<SavedLesson[]>("/api/lessons");
@@ -339,7 +377,8 @@ export default function Home() {
         method: "POST",
         cache: "no-store",
         credentials: "include",
-        body
+        body,
+        headers: authHeaders()
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -437,7 +476,7 @@ export default function Home() {
     } catch (caught) {
       if (isAuthRequired(caught)) {
         try {
-          await apiJson<{ user: AuthUser }>("/api/auth/me");
+          await apiJson<AuthResponse>("/api/auth/me");
           const lessons = await apiJson<SavedLesson[]>("/api/lessons");
           setSavedLessons(lessons);
           return;
@@ -485,7 +524,7 @@ export default function Home() {
       }
 
       const path = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
-      const payload = await apiJson<{ user: AuthUser }>(path, {
+      const payload = await apiJson<AuthResponse>(path, {
         method: "POST",
         body: JSON.stringify({
           email: authEmail,
@@ -493,6 +532,7 @@ export default function Home() {
           name: authName
         })
       });
+      storeSessionToken(payload.session_token);
       setUser(payload.user);
       setAuthPassword("");
       setAuthMessage(authMode === "signup" ? "Account created." : "Logged in.");
@@ -511,6 +551,7 @@ export default function Home() {
     setAuthMessage("");
     try {
       await apiJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+      storeSessionToken(null);
       setUser(null);
       setSavedLessons(localLessons);
       setActiveLessonId(null);

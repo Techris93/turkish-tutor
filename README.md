@@ -82,7 +82,7 @@ AUTH_COOKIE_SECURE=false
 AUTH_COOKIE_SAMESITE=lax
 ```
 
-The API creates the required tables at startup. User passwords are hashed with Argon2. Browser sessions use HTTP-only cookies, so the frontend must call the API with credentials enabled.
+The API creates the required tables at startup. User passwords are hashed with Argon2. Browser sessions use HTTP-only cookies, so the frontend must call the API with credentials enabled. For browsers that do not reliably keep the API cookie after a cross-subdomain OAuth redirect, the app also keeps the current session token in `sessionStorage` for that tab and sends it as `X-Session-Token`; logout invalidates the same server-side session.
 
 For a local password-reset test without sending email, set:
 
@@ -187,7 +187,7 @@ The web app includes:
 - Email/password sign-up and login.
 - Logout with server-side session invalidation.
 - Current-user check on app load.
-- HTTP-only cookie sessions stored in the database.
+- HTTP-only cookie sessions stored in the database, with a tab-scoped `sessionStorage` fallback for OAuth/cookie-constrained browsers.
 - SMTP-backed password reset request/confirm endpoints and UI.
 - Google and GitHub OAuth start/callback routes with database-backed state validation.
 - In-process rate limiting for high-risk endpoints.
@@ -217,7 +217,7 @@ OAUTH_ERROR_REDIRECT_URL=https://turkish-tutor-web.onrender.com/?oauth=error
 
 OAuth links accounts by verified/provider email. If the email already exists, the OAuth login uses the existing account; otherwise it creates a new account.
 
-After the provider callback, the API redirects the web app with a short-lived one-time handoff code. The frontend redeems that code, confirms `/api/auth/me`, loads saved lessons, and only then shows OAuth success. This avoids a misleading “OAuth login completed” state when a browser does not accept the session cookie. Handoff codes are stored hashed, expire quickly, and can be used only once.
+After the provider callback, the API redirects the web app with a short-lived one-time handoff code. The frontend redeems that code, stores the returned session token in `sessionStorage` for the current browser tab, confirms `/api/auth/me`, loads saved lessons, and only then shows OAuth success. This avoids a misleading “OAuth login completed” state when a browser does not accept the API session cookie across Render subdomains. Handoff codes are stored hashed, expire quickly, and can be used only once.
 
 ### Rate Limiting
 

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#176b5b"/>
+  <path d="M18 17h12c4 0 7 3 7 7v25c0-4-3-7-7-7H18V17Z" fill="#fffdf8" opacity=".96"/>
+  <path d="M46 17H34c-4 0-7 3-7 7v25c0-4 3-7 7-7h12V17Z" fill="#fffdf8" opacity=".82"/>
+  <path d="M32 18v30" stroke="#176b5b" stroke-width="2" stroke-linecap="round" opacity=".5"/>
+  <text x="32" y="37" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="800" fill="#176b5b" letter-spacing="0">TR</text>
+</svg>

@@ -165,21 +165,49 @@ In the frontend, use:
 - Per-card play buttons to hear one word or one example. In bilingual mode, word playback is spoken as pairs such as `gel, come`; example playback is spoken as pairs such as `buraya gel, come here`.
 - `Words` and `Examples` playback buttons to queue all detected vocabulary with the selected playback mode.
 
-Browser text-to-speech uses `SpeechSynthesis`. The app tries to use a Turkish voice for Turkish segments and a target-language voice for translations. Available voices vary by browser and operating system, so install system voices if pronunciation quality is limited.
+Read-aloud can use generated audio or browser text-to-speech:
+
+- `Auto`: uses generated audio when the API is configured and the learner is signed in, otherwise falls back to browser speech.
+- `Generated audio`: uses backend-generated audio through an `HTMLAudioElement`.
+- `Browser speech`: uses the browser `SpeechSynthesis` engine only.
+
+Browser text-to-speech tries to use a Turkish voice for Turkish segments and a target-language voice for translations. Available voices vary by browser and operating system, so install system voices if pronunciation quality is limited.
 
 ### Background Playback And PWA
 
 The web app is installable as a lightweight PWA. On supported browsers, install it from the browser menu or address-bar install button, then open it from the home screen/app launcher for the best background playback behavior.
 
-Read-aloud playback now uses a queue controller with progress, previous/next controls, pause/resume/stop, and Media Session API handlers. Where the browser supports Media Session, system media controls can show the current Turkish word/example and can control play, pause, stop, previous, and next.
+Read-aloud playback uses a queue controller with progress, previous/next controls, pause/resume/stop, and Media Session API handlers. Where the browser supports Media Session, system media controls can show the current Turkish word/example and can control play, pause, stop, previous, and next.
 
 Important limits:
 
-- The current implementation uses browser `SpeechSynthesis`, not generated audio files.
+- Generated audio is the recommended mode for mobile background and locked-screen listening because it uses normal browser audio playback.
+- Browser speech is still available as the free/no-key fallback.
 - Desktop browsers usually allow speech to continue while the tab is hidden or the window is minimized.
-- Mobile locked-screen playback is browser and OS dependent. iOS Safari and some mobile browsers may pause or stop browser-generated speech when the screen locks.
+- Mobile locked-screen playback is still browser and OS dependent. iOS Safari and some mobile browsers may pause or stop audio depending on install state, power settings, and autoplay rules.
 - Installing the PWA can improve the chance of background controls, but it cannot override mobile OS restrictions.
-- A future generated-audio provider such as ElevenLabs, Google Cloud TTS, Azure TTS, or OpenAI TTS can be added behind environment variables if guaranteed locked-screen audio becomes required.
+
+### Generated Audio TTS
+
+The API includes a provider abstraction and currently supports OpenAI TTS for production generated audio. It uses OpenAI's `audio/speech` endpoint, which supports MP3 output, built-in voices, and Turkish input text. The app discloses generated audio in the UI because OpenAI requires users to know when a voice is AI-generated.
+
+Configure locally:
+
+```bash
+TTS_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_TTS_MODEL=gpt-4o-mini-tts
+OPENAI_TTS_VOICE_TR=nova
+OPENAI_TTS_VOICE_DEFAULT=alloy
+OPENAI_TTS_TIMEOUT_SECONDS=45
+RATE_LIMIT_TTS=120/1h
+```
+
+For tests or local smoke checks without a paid provider, use `TTS_PROVIDER=mock`. The mock provider returns a tiny generated WAV tone and must not be used as production speech.
+
+Generated audio requires a signed-in user and is rate-limited to control provider cost. If `TTS_PROVIDER` or `OPENAI_API_KEY` is missing, the frontend shows a clear message and `Auto` falls back to browser speech.
+
+On Render, set `OPENAI_API_KEY` as a secret environment variable. The Blueprint includes non-secret defaults for `TTS_PROVIDER=openai`, `OPENAI_TTS_MODEL`, voices, timeout, and `RATE_LIMIT_TTS`.
 
 ### Saved Lessons And Accounts
 
@@ -245,14 +273,16 @@ RATE_LIMIT_PASSWORD_RESET=5/1h
 RATE_LIMIT_PASSWORD_RESET_CONFIRM=10/1h
 RATE_LIMIT_STUDY=30/1h
 RATE_LIMIT_LESSON_WRITE=120/1h
+RATE_LIMIT_TTS=120/1h
 ```
 
-The limiter is intentionally simple for this small app and protects sign-up, login, password reset, OAuth, lesson writes, and Gemini-backed study requests. If you run multiple API instances or open this app to broader public traffic, replace it with Redis or another shared rate limiter.
+The limiter is intentionally simple for this small app and protects sign-up, login, password reset, OAuth, lesson writes, Gemini-backed study requests, and generated TTS requests. If you run multiple API instances or open this app to broader public traffic, replace it with Redis or another shared rate limiter.
 
 Current production setup still required:
 
 - Add real SMTP credentials before password reset emails can be delivered.
 - Add Google/GitHub OAuth app credentials and exact redirect URLs before OAuth buttons become active.
+- Add `OPENAI_API_KEY` before generated audio TTS becomes available.
 - Keep `PASSWORD_RESET_RETURN_TOKEN=false` outside local development.
 
 After pushing changes to the branch connected to Render, Render should redeploy the API/static web services automatically from the Blueprint.
@@ -302,7 +332,7 @@ Text-to-speech uses macOS `say` automatically on macOS, including installed Turk
 
 ```bash
 source .venv/bin/activate
-python -m py_compile api.py auth_storage.py email_delivery.py oauth_flow.py rate_limit.py tutor.py config.py dataset.py evaluate.py swarm.py content_intelligence.py speech.py vocabulary_cards.py
+python -m py_compile api.py auth_storage.py email_delivery.py oauth_flow.py rate_limit.py tts_provider.py tutor.py config.py dataset.py evaluate.py swarm.py content_intelligence.py speech.py vocabulary_cards.py
 python -m unittest discover -s tests
 
 cd web
@@ -323,6 +353,7 @@ turkish-tutor/
 ├── email_delivery.py — SMTP password reset email delivery
 ├── oauth_flow.py   — Google/GitHub OAuth provider exchange helpers
 ├── rate_limit.py   — Small in-process API rate limiter
+├── tts_provider.py  — Generated-audio TTS provider abstraction and OpenAI TTS implementation
 ├── config.py       — Teaching strategies, CEFR levels, system prompt
 ├── content_intelligence.py — Text/PDF/DOCX/image extraction and CEFR study prompt helpers
 ├── vocabulary_cards.py — Structured vocabulary-card JSON parsing and fallbacks

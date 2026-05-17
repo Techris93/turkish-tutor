@@ -22,12 +22,14 @@ import {
 } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  PlaybackEngine,
   PlaybackMode,
   PlaybackQueueItem,
   SAVED_LESSONS_KEY,
   SavedLesson,
   SpeechSegment,
   StudyResponse,
+  audioCacheKey,
   createSavedLesson,
   deserializeLessons,
   examplePlaybackQueue,
@@ -35,6 +37,7 @@ import {
   formatPair,
   playbackProgress,
   serializeLessons,
+  shouldUseGeneratedAudio,
   textQueueItem,
   upsertLesson,
   wordPlaybackQueue,
@@ -47,6 +50,14 @@ type HealthResponse = {
   model: string;
   topics: number;
   error: string;
+};
+
+type TTSConfigResponse = {
+  provider: string;
+  configured: boolean;
+  auth_required: boolean;
+  voices: string[];
+  model: string;
 };
 
 type AuthUser = {
@@ -149,6 +160,10 @@ export default function Home() {
   const [playbackTotal, setPlaybackTotal] = useState(0);
   const [playbackNotice, setPlaybackNotice] = useState("");
   const [pwaReady, setPwaReady] = useState(false);
+  const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>("auto");
+  const [ttsConfig, setTtsConfig] = useState<TTSConfigResponse | null>(null);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [activeEngine, setActiveEngine] = useState<"generated" | "browser" | "idle">("idle");
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("bilingual");
@@ -174,6 +189,8 @@ export default function Home() {
   const playbackItemIndexRef = useRef(0);
   const playbackSegmentIndexRef = useRef(0);
   const playbackRunRef = useRef(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCacheRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
@@ -335,6 +352,36 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadTtsConfig() {
+      try {
+        const payload = await apiJson<TTSConfigResponse>("/api/tts/config");
+        if (!cancelled) {
+          setTtsConfig(payload);
+        }
+      } catch {
+        if (!cancelled) {
+          setTtsConfig({ provider: "none", configured: false, auth_required: true, voices: [], model: "" });
+        }
+      }
+    }
+    loadTtsConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const cache = audioCacheRef.current;
+    return () => {
+      for (const url of cache.values()) {
+        URL.revokeObjectURL(url);
+      }
+      cache.clear();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!("speechSynthesis" in window)) {
       return;
     }
@@ -359,7 +406,11 @@ export default function Home() {
       [
         "play",
         () => {
-          if ("speechSynthesis" in window) {
+          if (audioRef.current) {
+            void audioRef.current?.play();
+            setPaused(false);
+            navigator.mediaSession.playbackState = "playing";
+          } else if ("speechSynthesis" in window) {
             window.speechSynthesis.resume();
             setPaused(false);
             navigator.mediaSession.playbackState = "playing";
@@ -507,8 +558,12 @@ export default function Home() {
   }
 
   function resetPlaybackState(message = "") {
+    audioRef.current?.pause();
+    audioRef.current = null;
     setSpeaking(false);
     setPaused(false);
+    setAudioLoading(false);
+    setActiveEngine("idle");
     setPlaybackCurrent(0);
     setPlaybackTotal(0);
     setPlaybackLabel("");
@@ -516,29 +571,9 @@ export default function Home() {
     setMediaSession(null, "none");
   }
 
-  function playCurrentSegment() {
-    const queue = playbackQueueRef.current;
-    const item = queue[playbackItemIndexRef.current];
-    if (!item) {
-      resetPlaybackState("");
-      return;
-    }
-
-    const segment = item.segments[playbackSegmentIndexRef.current];
-    if (!segment) {
-      playbackItemIndexRef.current += 1;
-      playbackSegmentIndexRef.current = 0;
-      playCurrentSegment();
-      return;
-    }
-
-    const runId = playbackRunRef.current;
-    setSpeaking(true);
-    setPaused(false);
-    setPlaybackCurrent(playbackItemIndexRef.current);
-    setPlaybackTotal(queue.length);
-    setMediaSession(item, "playing");
-
+  function speakSegment(segment: SpeechSegment, runId: number) {
+    setAudioLoading(false);
+    setActiveEngine("browser");
     const utterance = new SpeechSynthesisUtterance(segment.text);
     utterance.lang = segment.lang;
     utterance.rate = speechRate;
@@ -552,7 +587,7 @@ export default function Home() {
         return;
       }
       playbackSegmentIndexRef.current += 1;
-      playCurrentSegment();
+      void playCurrentSegment();
     };
     utterance.onerror = () => {
       if (runId !== playbackRunRef.current) {
@@ -563,9 +598,112 @@ export default function Home() {
     window.speechSynthesis.speak(utterance);
   }
 
+  async function fetchGeneratedAudio(segment: SpeechSegment): Promise<string> {
+    const provider = ttsConfig?.provider || "auto";
+    const voice = segment.lang.toLowerCase().startsWith("tr") ? "tr" : "default";
+    const key = audioCacheKey(segment, provider, voice, speechRate);
+    const cached = audioCacheRef.current.get(key);
+    if (cached) {
+      return cached;
+    }
+    const response = await fetch(`${API_URL}/api/tts/audio`, {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders()
+      },
+      body: JSON.stringify({
+        text: segment.text,
+        language: segment.lang,
+        speed: speechRate,
+        provider: ttsConfig?.provider && ttsConfig.provider !== "none" ? ttsConfig.provider : undefined
+      })
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || "Generated audio is unavailable.");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    audioCacheRef.current.set(key, url);
+    return url;
+  }
+
+  async function playGeneratedSegment(segment: SpeechSegment, runId: number) {
+    setAudioLoading(true);
+    setActiveEngine("generated");
+    const url = await fetchGeneratedAudio(segment);
+    if (runId !== playbackRunRef.current) {
+      return;
+    }
+    const audio = new Audio(url);
+    audio.preload = "auto";
+    audio.playbackRate = speechRate;
+    audioRef.current = audio;
+    audio.onended = () => {
+      if (runId !== playbackRunRef.current) {
+        return;
+      }
+      playbackSegmentIndexRef.current += 1;
+      void playCurrentSegment();
+    };
+    audio.onerror = () => {
+      if (runId !== playbackRunRef.current) {
+        return;
+      }
+      setPlaybackNotice("Generated audio failed during playback. Falling back to browser speech.");
+      speakSegment(segment, runId);
+    };
+    setAudioLoading(false);
+    await audio.play();
+  }
+
+  async function playCurrentSegment() {
+    const queue = playbackQueueRef.current;
+    const item = queue[playbackItemIndexRef.current];
+    if (!item) {
+      resetPlaybackState("");
+      return;
+    }
+
+    const segment = item.segments[playbackSegmentIndexRef.current];
+    if (!segment) {
+      playbackItemIndexRef.current += 1;
+      playbackSegmentIndexRef.current = 0;
+      void playCurrentSegment();
+      return;
+    }
+
+    const runId = playbackRunRef.current;
+    setSpeaking(true);
+    setPaused(false);
+    setPlaybackCurrent(playbackItemIndexRef.current);
+    setPlaybackTotal(queue.length);
+    setMediaSession(item, "playing");
+
+    const useGenerated = shouldUseGeneratedAudio(playbackEngine, Boolean(ttsConfig?.configured), Boolean(user));
+    if (useGenerated) {
+      try {
+        await playGeneratedSegment(segment, runId);
+        return;
+      } catch (caught) {
+        const reason = caught instanceof Error ? caught.message : "Generated audio failed.";
+        if (playbackEngine === "generated") {
+          resetPlaybackState(reason);
+          return;
+        }
+        setPlaybackNotice(`${reason} Falling back to browser speech.`);
+      }
+    }
+    speakSegment(segment, runId);
+  }
+
   function startPlaybackQueue(queueItems: PlaybackQueueItem[], label: string) {
     const queue = queueItems.filter((item) => item.segments.length);
-    if (!("speechSynthesis" in window)) {
+    const useGenerated = shouldUseGeneratedAudio(playbackEngine, Boolean(ttsConfig?.configured), Boolean(user));
+    if (!useGenerated && !("speechSynthesis" in window)) {
       setPlaybackNotice("This browser does not support built-in text-to-speech.");
       return;
     }
@@ -574,7 +712,9 @@ export default function Home() {
       return;
     }
     playbackRunRef.current += 1;
-    window.speechSynthesis.cancel();
+    window.speechSynthesis?.cancel();
+    audioRef.current?.pause();
+    audioRef.current = null;
     playbackQueueRef.current = queue;
     playbackItemIndexRef.current = 0;
     playbackSegmentIndexRef.current = 0;
@@ -582,9 +722,13 @@ export default function Home() {
     setPlaybackTotal(queue.length);
     setPlaybackCurrent(0);
     setPlaybackNotice(
-      "Using browser speech. It can continue while minimized in many browsers, but locked-screen playback depends on your device."
+      useGenerated
+        ? "Using generated audio. This is the recommended mode for mobile background and lock-screen listening."
+        : playbackEngine === "generated"
+          ? "Generated audio is not configured or you are not signed in."
+          : "Using browser speech. It can continue while minimized in many browsers, but locked-screen playback depends on your device."
     );
-    playCurrentSegment();
+    void playCurrentSegment();
   }
 
   function speakSegments(segments: SpeechSegment[], label = "Read Aloud") {
@@ -839,17 +983,22 @@ export default function Home() {
   }
 
   function pauseOrResume() {
-    if (!("speechSynthesis" in window)) {
-      return;
-    }
     if (paused) {
-      window.speechSynthesis.resume();
+      if (activeEngine === "generated") {
+        void audioRef.current?.play();
+      } else if ("speechSynthesis" in window) {
+        window.speechSynthesis.resume();
+      }
       setPaused(false);
       if ("mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "playing";
       }
     } else {
-      window.speechSynthesis.pause();
+      if (activeEngine === "generated") {
+        audioRef.current?.pause();
+      } else if ("speechSynthesis" in window) {
+        window.speechSynthesis.pause();
+      }
       setPaused(true);
       if ("mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "paused";
@@ -859,23 +1008,28 @@ export default function Home() {
 
   function skipPlayback(direction: number) {
     const queue = playbackQueueRef.current;
-    if (!queue.length || !("speechSynthesis" in window)) {
+    if (!queue.length) {
       return;
     }
     const nextIndex = Math.min(Math.max(playbackItemIndexRef.current + direction, 0), queue.length - 1);
     playbackRunRef.current += 1;
-    window.speechSynthesis.cancel();
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    audioRef.current?.pause();
+    audioRef.current = null;
     playbackItemIndexRef.current = nextIndex;
     playbackSegmentIndexRef.current = 0;
-    playCurrentSegment();
+    void playCurrentSegment();
   }
 
   function stopSpeech() {
-    if (!("speechSynthesis" in window)) {
-      return;
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
     }
     playbackRunRef.current += 1;
-    window.speechSynthesis.cancel();
+    audioRef.current?.pause();
+    audioRef.current = null;
     playbackQueueRef.current = [];
     playbackItemIndexRef.current = 0;
     playbackSegmentIndexRef.current = 0;
@@ -1257,6 +1411,18 @@ export default function Home() {
                   </select>
                 </div>
                 <div className="field">
+                  <label htmlFor="playback-engine">Engine</label>
+                  <select
+                    id="playback-engine"
+                    value={playbackEngine}
+                    onChange={(event) => setPlaybackEngine(event.target.value as PlaybackEngine)}
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="generated">Generated audio</option>
+                    <option value="browser">Browser speech</option>
+                  </select>
+                </div>
+                <div className="field">
                   <label htmlFor="speech-rate">Rate</label>
                   <div className="range-row">
                     <input
@@ -1352,13 +1518,32 @@ export default function Home() {
               </div>
               <div className="playback-status" aria-live="polite">
                 <span>{speaking ? playbackLabel || "Read Aloud" : "Background playback"}</span>
-                <strong>{speaking ? playbackProgress(playbackCurrent, playbackTotal) : pwaReady ? "PWA ready" : "Browser speech"}</strong>
+                <strong>
+                  {audioLoading
+                    ? "Generating..."
+                    : speaking
+                      ? `${playbackProgress(playbackCurrent, playbackTotal)} · ${
+                          activeEngine === "generated" ? "audio" : "speech"
+                        }`
+                      : ttsConfig?.configured
+                        ? `${ttsConfig.provider} ready`
+                        : pwaReady
+                          ? "PWA ready"
+                          : "Browser speech"}
+                </strong>
               </div>
               <p className="muted-copy">
-                Browser speech may keep playing when the tab is hidden or the app is minimized. On mobile, locked-screen
-                playback depends on Safari/Chrome and the operating system; install the app for the best chance of
-                background controls.
+                Generated audio is recommended for mobile background and lock-screen listening. Browser speech remains
+                available as a free fallback; exact behavior still depends on Safari/Chrome and your operating system.
               </p>
+              {!ttsConfig?.configured && playbackEngine !== "browser" ? (
+                <p className="voice-warning">
+                  Generated audio is not configured. Add OpenAI TTS settings on the API, or choose Browser speech.
+                </p>
+              ) : null}
+              {ttsConfig?.configured && !user ? (
+                <p className="voice-warning">Sign in to use generated audio. Browser speech still works without an account.</p>
+              ) : null}
               {playbackNotice ? <p className="voice-warning">{playbackNotice}</p> : null}
               {!turkishVoices.length ? (
                 <p className="voice-warning">

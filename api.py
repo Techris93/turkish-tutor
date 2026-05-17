@@ -22,7 +22,7 @@ from urllib.parse import urlencode
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -79,6 +79,13 @@ from oauth_flow import (
 )
 from rate_limit import RateLimitRule, rate_limit
 from speech import list_macos_voices
+from tts_provider import (
+    TTSConfigError,
+    TTSProviderError,
+    TTSRequest as ProviderTTSRequest,
+    synthesize_tts,
+    tts_status,
+)
 from vocabulary_cards import (
     build_translation_lexicon,
     build_vocabulary_json_prompt,
@@ -208,6 +215,22 @@ class OAuthRedeemResponse(BaseModel):
     user: UserResponse
     lessons: List[SavedLessonResponse]
     session_token: str
+
+
+class TTSConfigResponse(BaseModel):
+    provider: str
+    configured: bool
+    auth_required: bool
+    voices: List[str]
+    model: str
+
+
+class TTSAudioRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4096)
+    language: str = Field("tr-TR", min_length=2, max_length=24)
+    voice: Optional[str] = Field(None, max_length=80)
+    speed: float = Field(1.0, ge=0.5, le=2.0)
+    provider: Optional[str] = Field(None, max_length=40)
 
 
 GEMINI_STATE: Dict[str, Any] = {
@@ -499,6 +522,55 @@ async def voices(language: str = "auto") -> Dict[str, Any]:
             for voice in voice_list
         ]
     }
+
+
+@app.get("/api/tts/config", response_model=TTSConfigResponse)
+async def tts_config() -> TTSConfigResponse:
+    status_payload = tts_status()
+    return TTSConfigResponse(
+        provider=status_payload.provider,
+        configured=status_payload.configured,
+        auth_required=status_payload.auth_required,
+        voices=status_payload.voices,
+        model=status_payload.model,
+    )
+
+
+@app.post("/api/tts/audio")
+async def tts_audio(
+    payload: TTSAudioRequest,
+    request: Request,
+    user: User = Depends(current_user),
+) -> Response:
+    rate_limit(request, "tts", RateLimitRule(120, 3600), user.id)
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required for generated audio.")
+    try:
+        audio = await synthesize_tts(
+            ProviderTTSRequest(
+                text=text,
+                language=payload.language.strip(),
+                voice=payload.voice.strip() if payload.voice else None,
+                speed=payload.speed,
+                provider=payload.provider.strip().lower() if payload.provider else None,
+            )
+        )
+    except TTSConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except TTSProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return Response(
+        content=audio.audio,
+        media_type=audio.media_type,
+        headers={
+            "Cache-Control": "no-store",
+            "X-TTS-Provider": audio.provider,
+            "X-TTS-Voice": audio.voice,
+            "X-TTS-Model": audio.model,
+        },
+    )
 
 
 @app.post("/api/auth/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)

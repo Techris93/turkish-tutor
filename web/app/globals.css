@@ -674,7 +674,7 @@ input[type="password"]:focus {
 
 .tts-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.8fr) minmax(130px, 0.6fr);
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.8fr) minmax(150px, 0.7fr) minmax(130px, 0.6fr);
   gap: 12px;
   align-items: end;
 }

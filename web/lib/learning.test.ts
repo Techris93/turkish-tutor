@@ -4,6 +4,7 @@ import {
   SavedLesson,
   StudyResponse,
   VocabularyCard,
+  audioCacheKey,
   createSavedLesson,
   deserializeLessons,
   examplePlaybackQueue,
@@ -11,6 +12,7 @@ import {
   formatPair,
   playbackProgress,
   serializeLessons,
+  shouldUseGeneratedAudio,
   textQueueItem,
   upsertLesson,
   wordPlaybackQueue,
@@ -85,6 +87,21 @@ test("text queue and progress helpers are deterministic", () => {
   assert.equal(playbackProgress(0, 3), "1 of 3");
   assert.equal(playbackProgress(10, 3), "3 of 3");
   assert.equal(playbackProgress(0, 0), "Ready");
+});
+
+test("generated audio cache keys include text, voice, speed, and provider", () => {
+  const segment = { text: "gel", lang: "tr-TR" };
+  assert.notEqual(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "nova", 1.2));
+  assert.notEqual(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "alloy", 1));
+  assert.equal(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "nova", 1.004));
+});
+
+test("generated audio engine selection respects config and auth state", () => {
+  assert.equal(shouldUseGeneratedAudio("auto", true, true), true);
+  assert.equal(shouldUseGeneratedAudio("auto", false, true), false);
+  assert.equal(shouldUseGeneratedAudio("generated", true, true), true);
+  assert.equal(shouldUseGeneratedAudio("generated", true, false), false);
+  assert.equal(shouldUseGeneratedAudio("browser", true, true), false);
 });
 
 test("saved lessons serialize, deserialize, and upsert", () => {

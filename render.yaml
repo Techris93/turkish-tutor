@@ -72,6 +72,20 @@ services:
         value: "30/1h"
       - key: RATE_LIMIT_LESSON_WRITE
         value: "120/1h"
+      - key: RATE_LIMIT_TTS
+        value: "120/1h"
+      - key: TTS_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_TTS_MODEL
+        value: gpt-4o-mini-tts
+      - key: OPENAI_TTS_VOICE_TR
+        value: nova
+      - key: OPENAI_TTS_VOICE_DEFAULT
+        value: alloy
+      - key: OPENAI_TTS_TIMEOUT_SECONDS
+        value: "45"
 
   - type: web
     name: turkish-tutor-web

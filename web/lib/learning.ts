@@ -1,4 +1,5 @@
 export type PlaybackMode = "turkish" | "translation" | "bilingual";
+export type PlaybackEngine = "auto" | "generated" | "browser";
 
 export type StudyUnit = {
   text: string;
@@ -157,6 +158,33 @@ export function playbackProgress(currentIndex: number, total: number): string {
   }
   const current = Math.min(Math.max(currentIndex + 1, 1), total);
   return `${current} of ${total}`;
+}
+
+export function audioCacheKey(segment: SpeechSegment, provider: string, voice: string, speed: number): string {
+  return JSON.stringify({
+    text: segment.text,
+    lang: segment.lang,
+    provider: provider || "auto",
+    voice: voice || "auto",
+    speed: Number(speed.toFixed(2))
+  });
+}
+
+export function shouldUseGeneratedAudio(
+  engine: PlaybackEngine,
+  generatedConfigured: boolean,
+  signedIn: boolean
+): boolean {
+  if (!signedIn) {
+    return false;
+  }
+  if (engine === "browser") {
+    return false;
+  }
+  if (engine === "generated") {
+    return generatedConfigured;
+  }
+  return generatedConfigured;
 }
 
 export function createSavedLesson(result: StudyResponse, title?: string): SavedLesson {

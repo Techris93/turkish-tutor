@@ -10,6 +10,7 @@ import {
   examplePlaybackQueue,
   exampleSegments,
   formatPair,
+  normalizePlaybackRate,
   playbackProgress,
   serializeLessons,
   shouldUseGeneratedAudio,
@@ -105,6 +106,17 @@ test("generated audio cache keys include text, voice, speed, and provider", () =
   assert.notEqual(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "nova", 1.2));
   assert.notEqual(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "alloy", 1));
   assert.equal(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "nova", 1.004));
+});
+
+test("playback rate is normalized for speech and generated audio", () => {
+  assert.equal(normalizePlaybackRate(0.2), 0.7);
+  assert.equal(normalizePlaybackRate(1.24), 1.2);
+  assert.equal(normalizePlaybackRate(2.5), 1.6);
+  assert.equal(normalizePlaybackRate(Number.NaN), 1);
+
+  const segment = { text: "gel", lang: "tr-TR" };
+  assert.equal(audioCacheKey(segment, "openai", "nova", 1.04), audioCacheKey(segment, "openai", "nova", 1));
+  assert.notEqual(audioCacheKey(segment, "openai", "nova", 1.05), audioCacheKey(segment, "openai", "nova", 1));
 });
 
 test("generated audio engine selection requires explicit generated mode", () => {

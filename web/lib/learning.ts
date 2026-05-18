@@ -53,6 +53,8 @@ export type PlaybackQueueItem = {
 };
 
 export const SAVED_LESSONS_KEY = "turkce-hoca.saved-lessons.v1";
+export const MIN_PLAYBACK_RATE = 0.7;
+export const MAX_PLAYBACK_RATE = 1.6;
 
 const targetLanguageCodes: Record<string, string> = {
   english: "en-US",
@@ -160,13 +162,21 @@ export function playbackProgress(currentIndex: number, total: number): string {
   return `${current} of ${total}`;
 }
 
+export function normalizePlaybackRate(rate: number): number {
+  if (!Number.isFinite(rate)) {
+    return 1;
+  }
+  const bounded = Math.min(Math.max(rate, MIN_PLAYBACK_RATE), MAX_PLAYBACK_RATE);
+  return Number(bounded.toFixed(1));
+}
+
 export function audioCacheKey(segment: SpeechSegment, provider: string, voice: string, speed: number): string {
   return JSON.stringify({
     text: segment.text,
     lang: segment.lang,
     provider: provider || "auto",
     voice: voice || "auto",
-    speed: Number(speed.toFixed(2))
+    speed: normalizePlaybackRate(speed)
   });
 }
 

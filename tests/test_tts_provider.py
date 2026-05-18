@@ -93,19 +93,22 @@ class TTSApiTests(unittest.TestCase):
 
     def test_tts_audio_mocked_provider_success(self):
         signed_in = self.signup()
+        mocked_synthesize = AsyncMock(return_value=TTSResult(b"audio", "audio/mpeg", "openai", "nova", "gpt-4o-mini-tts"))
         with patch.object(
             api,
             "synthesize_tts",
-            new=AsyncMock(return_value=TTSResult(b"audio", "audio/mpeg", "openai", "nova", "gpt-4o-mini-tts")),
+            new=mocked_synthesize,
         ):
             response = signed_in.post(
                 "/api/tts/audio",
-                json={"text": "Merhaba", "language": "tr-TR", "provider": "openai"},
+                json={"text": "Merhaba", "language": "tr-TR", "provider": "openai", "speed": 1.4},
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "audio/mpeg")
         self.assertEqual(response.headers["x-tts-provider"], "openai")
         self.assertEqual(response.content, b"audio")
+        forwarded_request = mocked_synthesize.await_args.args[0]
+        self.assertEqual(forwarded_request.speed, 1.4)
 
     def test_tts_rate_limit_returns_429(self):
         os.environ["RATE_LIMIT_ENABLED"] = "true"

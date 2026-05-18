@@ -164,6 +164,7 @@ In the frontend, use:
 - The playback mode menu to choose `Translation + Turkish`, `Turkish only`, or `Translation only`.
 - Per-card play buttons to hear one word or one example. In bilingual mode, word playback is spoken as pairs such as `come, gel`; example playback is spoken as pairs such as `come here, buraya gel`.
 - `Words` and `Examples` playback buttons to queue all detected vocabulary with the selected playback mode.
+- The rate slider controls playback speed for browser speech and generated audio. Browser speech restarts the current segment when the rate changes because browsers do not let an active `SpeechSynthesisUtterance` change speed mid-utterance.
 
 Read-aloud can use generated audio or browser text-to-speech:
 

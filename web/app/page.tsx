@@ -35,6 +35,7 @@ import {
   examplePlaybackQueue,
   exampleSegments,
   formatPair,
+  normalizePlaybackRate,
   playbackProgress,
   serializeLessons,
   shouldUseGeneratedAudio,
@@ -193,6 +194,7 @@ export default function Home() {
   const playbackRunRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioCacheRef = useRef<Map<string, string>>(new Map());
+  const speechRateRef = useRef(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -580,7 +582,7 @@ export default function Home() {
     setActiveEngine("browser");
     const utterance = new SpeechSynthesisUtterance(segment.text);
     utterance.lang = segment.lang;
-    utterance.rate = speechRate;
+    utterance.rate = speechRateRef.current;
     const voice = selectVoiceForLanguage(segment.lang);
     if (voice) {
       utterance.voice = voice;
@@ -605,7 +607,8 @@ export default function Home() {
   async function fetchGeneratedAudio(segment: SpeechSegment): Promise<string> {
     const provider = ttsConfig?.provider || "auto";
     const voice = segment.lang.toLowerCase().startsWith("tr") ? "tr" : "default";
-    const key = audioCacheKey(segment, provider, voice, speechRate);
+    const rate = speechRateRef.current;
+    const key = audioCacheKey(segment, provider, voice, rate);
     const cached = audioCacheRef.current.get(key);
     if (cached) {
       return cached;
@@ -621,7 +624,7 @@ export default function Home() {
       body: JSON.stringify({
         text: segment.text,
         language: segment.lang,
-        speed: speechRate,
+        speed: rate,
         provider: ttsConfig?.provider && ttsConfig.provider !== "none" ? ttsConfig.provider : undefined
       })
     });
@@ -644,7 +647,7 @@ export default function Home() {
     }
     const audio = new Audio(url);
     audio.preload = "auto";
-    audio.playbackRate = speechRate;
+    audio.playbackRate = speechRateRef.current;
     audioRef.current = audio;
     audio.onended = () => {
       if (runId !== playbackRunRef.current) {
@@ -1040,6 +1043,27 @@ export default function Home() {
     playbackItemIndexRef.current = nextIndex;
     playbackSegmentIndexRef.current = 0;
     void playCurrentSegment();
+  }
+
+  function changeSpeechRate(nextRate: number) {
+    const normalized = normalizePlaybackRate(nextRate);
+    speechRateRef.current = normalized;
+    setSpeechRate(normalized);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = normalized;
+    }
+
+    if (
+      activeEngine === "browser" &&
+      speaking &&
+      !paused &&
+      playbackQueueRef.current.length &&
+      "speechSynthesis" in window
+    ) {
+      playbackRunRef.current += 1;
+      window.speechSynthesis.cancel();
+      void playCurrentSegment();
+    }
   }
 
   function stopSpeech() {
@@ -1465,7 +1489,7 @@ export default function Home() {
                       step="0.1"
                       type="range"
                       value={speechRate}
-                      onChange={(event) => setSpeechRate(Number(event.target.value))}
+                      onChange={(event) => changeSpeechRate(Number(event.target.value))}
                     />
                     <strong>{speechRate.toFixed(1)}x</strong>
                   </div>

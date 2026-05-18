@@ -4,8 +4,8 @@ export const dynamic = "force-static";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Turkce Hoca",
-    short_name: "Turkce Hoca",
+    name: "Türkçe Hoca",
+    short_name: "Türkçe Hoca",
     description: "CEFR-aware Turkish tutor with vocabulary read-aloud practice.",
     start_url: "/",
     scope: "/",

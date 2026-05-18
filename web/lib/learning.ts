@@ -121,7 +121,7 @@ function queueItem(id: string, title: string, subtitle: string, segments: Speech
 }
 
 export function textQueueItem(text: string, title = "Study note"): PlaybackQueueItem {
-  return queueItem("study-note", title, "Turkce Hoca", [{ text: normalizeSpeechText(text), lang: "tr-TR" }]);
+  return queueItem("study-note", title, "Türkçe Hoca", [{ text: normalizeSpeechText(text), lang: "tr-TR" }]);
 }
 
 export function wordPlaybackQueue(

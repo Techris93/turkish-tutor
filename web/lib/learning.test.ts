@@ -93,7 +93,7 @@ test("text queue and progress helpers are deterministic", () => {
   assert.deepEqual(textQueueItem("  Merhaba   dünya  "), {
     id: "study-note",
     title: "Study note",
-    subtitle: "Turkce Hoca",
+    subtitle: "Türkçe Hoca",
     segments: [{ text: "Merhaba dünya", lang: "tr-TR" }]
   });
   assert.equal(playbackProgress(0, 3), "1 of 3");

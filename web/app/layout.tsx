@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Turkce Hoca",
+  title: "Türkçe Hoca",
   description: "A CEFR-aware Turkish tutor workspace",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Turkce Hoca"
+    title: "Türkçe Hoca"
   }
 };
 

@@ -481,6 +481,12 @@ input:focus {
   margin-top: 12px;
 }
 
+.oauth-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
 .lesson-save-row {
   display: grid;
   grid-template-columns: 1fr auto;

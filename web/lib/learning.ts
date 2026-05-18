@@ -72,8 +72,8 @@ function normalizeSpeechText(text: string): string {
 }
 
 export function formatPair(primary: string, translation: string): string {
-  const left = normalizeSpeechText(primary).replace(/[.!?]+$/, "");
-  const right = normalizeSpeechText(translation);
+  const left = normalizeSpeechText(translation).replace(/[.!?]+$/, "");
+  const right = normalizeSpeechText(primary).replace(/[.!?]+$/, "");
   if (left && right) {
     return `${left}, ${right}`;
   }
@@ -88,8 +88,8 @@ export function wordSegments(card: VocabularyCard, targetLanguage: string, mode:
     return [{ text: normalizeSpeechText(card.translation), lang: languageCode(targetLanguage) }];
   }
   return [
-    { text: normalizeSpeechText(card.tts_word || card.turkish), lang: "tr-TR" },
-    { text: normalizeSpeechText(card.translation), lang: languageCode(targetLanguage) }
+    { text: normalizeSpeechText(card.translation), lang: languageCode(targetLanguage) },
+    { text: normalizeSpeechText(card.tts_word || card.turkish), lang: "tr-TR" }
   ].filter((segment) => segment.text);
 }
 
@@ -101,8 +101,8 @@ export function exampleSegments(card: VocabularyCard, targetLanguage: string, mo
     return [{ text: normalizeSpeechText(card.example_translation), lang: languageCode(targetLanguage) }];
   }
   return [
-    { text: normalizeSpeechText(card.tts_sentence || card.example_tr), lang: "tr-TR" },
-    { text: normalizeSpeechText(card.example_translation), lang: languageCode(targetLanguage) }
+    { text: normalizeSpeechText(card.example_translation), lang: languageCode(targetLanguage) },
+    { text: normalizeSpeechText(card.tts_sentence || card.example_tr), lang: "tr-TR" }
   ].filter((segment) => segment.text);
 }
 

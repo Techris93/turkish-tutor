@@ -1439,7 +1439,7 @@ export default function Home() {
                     value={playbackMode}
                     onChange={(event) => setPlaybackMode(event.target.value as PlaybackMode)}
                   >
-                    <option value="bilingual">Turkish + translation</option>
+                    <option value="bilingual">Translation + Turkish</option>
                     <option value="turkish">Turkish only</option>
                     <option value="translation">Translation only</option>
                   </select>

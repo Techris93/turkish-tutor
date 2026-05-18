@@ -161,8 +161,8 @@ In the frontend, use:
 
 - Search to find a word, translation, or example.
 - Type filter to focus on verbs, colors, nationalities, places, or phrases.
-- The playback mode menu to choose `Turkish + translation`, `Turkish only`, or `Translation only`.
-- Per-card play buttons to hear one word or one example. In bilingual mode, word playback is spoken as pairs such as `gel, come`; example playback is spoken as pairs such as `buraya gel, come here`.
+- The playback mode menu to choose `Translation + Turkish`, `Turkish only`, or `Translation only`.
+- Per-card play buttons to hear one word or one example. In bilingual mode, word playback is spoken as pairs such as `come, gel`; example playback is spoken as pairs such as `come here, buraya gel`.
 - `Words` and `Examples` playback buttons to queue all detected vocabulary with the selected playback mode.
 
 Read-aloud can use generated audio or browser text-to-speech:

@@ -45,14 +45,21 @@ const result: StudyResponse = {
 };
 
 test("formatPair formats bilingual read-aloud text", () => {
-  assert.equal(formatPair("gel", "come"), "gel, come");
-  assert.equal(formatPair("Buraya gel.", "Come here."), "Buraya gel, Come here.");
+  assert.equal(formatPair("gel", "come"), "come, gel");
+  assert.equal(formatPair("Buraya gel.", "Come here."), "Come here, Buraya gel");
 });
 
-test("wordSegments returns Turkish then translation for bilingual mode", () => {
+test("wordSegments returns translation then Turkish for bilingual mode", () => {
   assert.deepEqual(wordSegments(card, "English", "bilingual"), [
-    { text: "gel", lang: "tr-TR" },
-    { text: "come", lang: "en-US" }
+    { text: "come", lang: "en-US" },
+    { text: "gel", lang: "tr-TR" }
+  ]);
+});
+
+test("exampleSegments returns translated example then Turkish example for bilingual mode", () => {
+  assert.deepEqual(exampleSegments(card, "English", "bilingual"), [
+    { text: "Come here.", lang: "en-US" },
+    { text: "Buraya gel.", lang: "tr-TR" }
   ]);
 });
 
@@ -68,13 +75,17 @@ test("playback queues preserve word and example metadata", () => {
   assert.equal(words[0].title, "gel");
   assert.equal(words[0].subtitle, "come");
   assert.deepEqual(words[0].segments, [
-    { text: "gel", lang: "tr-TR" },
-    { text: "come", lang: "en-US" }
+    { text: "come", lang: "en-US" },
+    { text: "gel", lang: "tr-TR" }
   ]);
 
   const examples = examplePlaybackQueue([card], "English", "bilingual");
   assert.equal(examples[0].title, "Buraya gel.");
   assert.equal(examples[0].subtitle, "Come here.");
+  assert.deepEqual(examples[0].segments, [
+    { text: "Come here.", lang: "en-US" },
+    { text: "Buraya gel.", lang: "tr-TR" }
+  ]);
 });
 
 test("text queue and progress helpers are deterministic", () => {

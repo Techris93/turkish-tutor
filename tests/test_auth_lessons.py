@@ -80,6 +80,10 @@ class AuthLessonTests(unittest.TestCase):
             "AUTH_COOKIE_SECURE",
             "MAX_UPLOAD_BYTES",
             "MAX_TEXT_INPUT_CHARS",
+            "CSRF_PROTECTION_ENABLED",
+            "FRONTEND_ORIGIN",
+            "RATE_LIMIT_BACKEND",
+            "REDIS_URL",
         ]:
             os.environ.pop(key, None)
         limiter.clear()
@@ -414,6 +418,32 @@ class AuthLessonTests(unittest.TestCase):
         cookie = response.headers["set-cookie"].lower()
         self.assertIn("samesite=none", cookie)
         self.assertIn("secure", cookie)
+
+    def test_csrf_origin_guard_blocks_cookie_mutation_without_trusted_origin(self):
+        os.environ["CSRF_PROTECTION_ENABLED"] = "true"
+        os.environ["FRONTEND_ORIGIN"] = "http://localhost:3000"
+        owner = self.signup("csrf@example.com")
+
+        blocked = owner.post("/api/lessons", json={"title": "Blocked", "result": study_result()})
+        self.assertEqual(blocked.status_code, 403)
+        self.assertIn("Cross-site request rejected", blocked.json()["detail"])
+
+        allowed = owner.post(
+            "/api/lessons",
+            headers={"Origin": "http://localhost:3000"},
+            json={"title": "Allowed", "result": study_result()},
+        )
+        self.assertEqual(allowed.status_code, 201)
+
+    def test_redis_rate_limit_backend_requires_url(self):
+        os.environ["RATE_LIMIT_ENABLED"] = "true"
+        os.environ["RATE_LIMIT_BACKEND"] = "redis"
+        response = self.client.post(
+            "/api/auth/login",
+            json={"email": "missing@example.com", "password": "password123"},
+        )
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("REDIS_URL is missing", response.json()["detail"])
 
     def test_study_rejects_unsupported_and_oversized_uploads(self):
         unsupported = self.client.post(

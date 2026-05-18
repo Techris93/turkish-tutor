@@ -7,10 +7,10 @@ Scope: FastAPI API, Next.js static frontend, authentication/session flows, OAuth
 
 - Critical: 1 total, 1 fixed
 - High: 3 total, 3 fixed
-- Medium: 8 total, 4 fixed, 4 documented risks
+- Medium: 8 total, 5 fixed, 3 partially mitigated/documented risks
 - Low: 5 total, 1 fixed, 4 documented risks
 
-Overall risk posture after this audit is moderate for a 1-2 person personal learning app. The highest-risk code issues found during the audit were fixed: API text input no longer reads arbitrary server files, upload parsing now has type and size limits, Google OAuth now requires verified email, production API docs are disabled by default, security headers were added, and a known vulnerable PostCSS transitive dependency was overridden to a patched version. Remaining risk is mostly architectural and operational: remembered session tokens in `localStorage`, simple in-process rate limiting, third-party AI/TTS data sharing, and SQLite/local-device assumptions if used outside the Render Postgres blueprint.
+Overall risk posture after this audit is moderate for a 1-2 person personal learning app. The highest-risk code issues found during the audit were fixed: API text input no longer reads arbitrary server files, upload parsing now has type and size limits, Google OAuth now requires verified email, production API docs are disabled by default, security headers were added, cookie-auth CSRF Origin checks were added for production, and a known vulnerable PostCSS transitive dependency was overridden to a patched version. Remaining risk is mostly architectural and operational: remembered session tokens in `localStorage` when explicitly enabled, third-party AI/TTS data sharing, and SQLite/local-device assumptions if used outside the Render Postgres blueprint.
 
 ### Threat Model
 
@@ -141,7 +141,7 @@ Primary trust boundaries:
   3. Attacker replays it in `X-Session-Token` until expiration/logout.
 - Impact: Account takeover for the session lifetime.
 - Recommended fix: Prefer a shared custom domain and HTTP-only refresh/session cookies. Keep Remember me opt-in and clearly labeled for trusted devices only.
-- Status: Documented risk. Current app keeps Remember me opt-in, logout invalidates the server session, and CSP/React escaping reduce XSS risk.
+- Status: Partially fixed now. Remember me remains opt-in, logout invalidates the server session, CSP/React escaping reduce XSS risk, and deployments can set `NEXT_PUBLIC_ALLOW_REMEMBER_ME=false` to ignore remembered localStorage tokens after moving to reliable shared-domain cookies.
 
 ### 9. CSRF Protection Is Limited
 
@@ -154,7 +154,7 @@ Primary trust boundaries:
   3. User is logged out without consent.
 - Impact: Mostly logout CSRF today; risk grows if form-compatible state-changing endpoints are added.
 - Recommended fix: Add CSRF tokens or enforce Origin/Referer checks on cookie-authenticated unsafe methods. Header-token-only auth avoids this but trades toward token theft risk.
-- Status: Documented risk. No high-impact form-compatible authenticated mutation was found beyond logout.
+- Status: Fixed for production. `CSRF_PROTECTION_ENABLED=true` enforces trusted `Origin`/`Referer` checks for unsafe methods carrying the session cookie. Header-token-only API calls are not CSRFable by browser forms.
 
 ### 10. In-Process Rate Limiting Is Not Distributed
 
@@ -166,7 +166,7 @@ Primary trust boundaries:
   2. Attacker bypasses intended login/study/TTS quotas.
 - Impact: Brute force, Gemini/OpenAI denial-of-wallet, and availability risk.
 - Recommended fix: Use Redis or another shared store for rate limits if the app becomes public or scales beyond one instance.
-- Status: Documented risk. Acceptable for current small single-instance app.
+- Status: Partially fixed now. The default remains memory for the small single-instance deployment, but `RATE_LIMIT_BACKEND=redis` plus `REDIS_URL` enables shared Redis-backed counters.
 
 ### 11. Third-Party AI/TTS Data Disclosure Boundary
 
@@ -179,7 +179,7 @@ Primary trust boundaries:
   3. Provider-side logging/retention policies apply.
 - Impact: Privacy/compliance exposure.
 - Recommended fix: Add an in-app privacy notice, avoid uploading sensitive content, and use provider settings/contracts appropriate for production.
-- Status: Documented risk.
+- Status: Partially fixed now. The UI now discloses Gemini analysis and generated-audio provider boundaries. Provider retention/compliance remains an operational decision.
 
 ### 12. Prompt Injection Can Influence Tutor Output
 
@@ -300,12 +300,12 @@ Status: Google now requires `email_verified`; GitHub already requires a verified
 ## 4. Secure Design Recommendations
 
 - Use a shared custom domain such as `app.example.com` and `api.example.com` or a reverse proxy under one site so HTTP-only cookies work reliably without `localStorage` session fallback.
-- Add CSRF protection or strict Origin checks for all cookie-authenticated unsafe methods before adding more form-compatible endpoints.
-- Replace in-process rate limiting with Redis/shared counters if the app is opened to broad public use or scaled to multiple API instances.
+- Keep `CSRF_PROTECTION_ENABLED=true` in production so cookie-authenticated unsafe methods require trusted `Origin`/`Referer` headers.
+- Use `RATE_LIMIT_BACKEND=redis` and `REDIS_URL` if the app is opened to broad public use or scaled to multiple API instances.
 - Add upload scanning/timeouts and parser sandboxing for hostile PDFs/DOCX/images if arbitrary users can upload files.
-- Add a visible privacy notice: uploaded content may be sent to Gemini, and generated audio text may be sent to OpenAI when generated audio is selected.
+- Keep the visible privacy notice accurate as Gemini/TTS providers change.
 - Keep `PASSWORD_RESET_RETURN_TOKEN=false`, `ENABLE_API_DOCS=false`, and real SMTP/OAuth secrets configured only in Render secret env vars.
-- Review CSP whenever deployment domains change.
+- Set `NEXT_PUBLIC_CSP_CONNECT_SRC` whenever deployment domains change; `npm run build` regenerates the static `_headers` file.
 - Consider a dependency maintenance cadence: run `npm audit`, `pip-audit`, and framework update checks before each production deploy.
 - Add operational logging for rate-limit hits, failed logins, reset requests, OAuth failures, and provider-cost endpoints, while never logging tokens or lesson contents.
 - Add database backups for Postgres if saved lessons matter.

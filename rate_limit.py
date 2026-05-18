@@ -5,7 +5,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from threading import Lock
-from typing import Deque, Dict, Tuple
+from typing import Deque, Dict, Optional
 
 from fastapi import HTTPException, Request, status
 
@@ -43,6 +43,7 @@ class InMemoryRateLimiter:
 
 
 limiter = InMemoryRateLimiter()
+_redis_limiter: Optional["RedisRateLimiter"] = None
 
 
 def parse_limit(value: str, fallback: RateLimitRule) -> RateLimitRule:
@@ -85,9 +86,67 @@ def client_ip(request: Request) -> str:
     return "unknown"
 
 
+class RedisRateLimiter:
+    def __init__(self, url: str) -> None:
+        try:
+            import redis  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("Redis rate limiting requires the redis Python package.") from exc
+        self.client = redis.from_url(url, decode_responses=True)
+
+    def check(self, key: str, rule: RateLimitRule) -> None:
+        if rule.requests <= 0:
+            return
+        now = int(time.time())
+        window = max(rule.window_seconds, 1)
+        bucket = now // window
+        redis_key = f"rate-limit:{key}:{bucket}"
+        try:
+            count = int(self.client.incr(redis_key))
+            if count == 1:
+                self.client.expire(redis_key, window + 5)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Rate limiter is unavailable. Please try again shortly.",
+            ) from exc
+        if count > rule.requests:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many requests. Please wait and try again.",
+            )
+
+
+def redis_limiter() -> Optional[RedisRateLimiter]:
+    global _redis_limiter
+    url = os.environ.get("REDIS_URL", "").strip()
+    backend = os.environ.get("RATE_LIMIT_BACKEND", "").strip().lower()
+    if backend != "redis" and not url:
+        return None
+    if not url:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis rate limiting is configured but REDIS_URL is missing.",
+        )
+    if _redis_limiter is None:
+        try:
+            _redis_limiter = RedisRateLimiter(url)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
+    return _redis_limiter
+
+
 def rate_limit(request: Request, name: str, fallback: RateLimitRule, user_id: str | None = None) -> None:
     if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}:
         return
     identity = user_id or client_ip(request)
     rule = rule_for(name, fallback)
-    limiter.check(f"{name}:{identity}", rule)
+    key = f"{name}:{identity}"
+    shared_limiter = redis_limiter()
+    if shared_limiter is not None:
+        shared_limiter.check(key, rule)
+        return
+    limiter.check(key, rule)

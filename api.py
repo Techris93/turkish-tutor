@@ -17,11 +17,11 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -345,6 +345,32 @@ def api_docs_enabled() -> bool:
     return os.environ.get("RENDER", "").lower() != "true"
 
 
+def csrf_protection_enabled() -> bool:
+    configured = os.environ.get("CSRF_PROTECTION_ENABLED")
+    if configured is not None:
+        return configured.lower() in {"1", "true", "yes", "on"}
+    return os.environ.get("RENDER", "").lower() == "true"
+
+
+def origin_from_url(value: str) -> str:
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+
+def request_origin(request: Request) -> str:
+    origin = request.headers.get("origin", "").strip().rstrip("/")
+    if origin:
+        return origin
+    referer = request.headers.get("referer", "").strip()
+    return origin_from_url(referer)
+
+
+def request_url_origin(request: Request) -> str:
+    return f"{request.url.scheme}://{request.url.netloc}".rstrip("/")
+
+
 def model_dump(model: BaseModel) -> Dict[str, Any]:
     if hasattr(model, "model_dump"):
         return model.model_dump()  # type: ignore[no-any-return]
@@ -544,6 +570,19 @@ async def security_headers(request: Request, call_next):  # type: ignore[no-unty
     if request.url.path.startswith(("/api/auth", "/api/lessons", "/api/study", "/api/tts/audio")):
         response.headers.setdefault("Cache-Control", "no-store")
     return response
+
+
+@app.middleware("http")
+async def csrf_origin_guard(request: Request, call_next):  # type: ignore[no-untyped-def]
+    unsafe_method = request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
+    cookie_session = request.cookies.get(SESSION_COOKIE_NAME)
+    if csrf_protection_enabled() and unsafe_method and cookie_session:
+        origin = request_origin(request)
+        trusted_origins = set(allowed_origins())
+        trusted_origins.add(request_url_origin(request))
+        if not origin or origin not in trusted_origins:
+            return JSONResponse(status_code=403, content={"detail": "Cross-site request rejected."})
+    return await call_next(request)
 
 
 @app.on_event("startup")

@@ -45,6 +45,8 @@ import {
   wordSegments
 } from "../lib/learning";
 import {
+  REMEMBERED_SESSION_TOKEN_KEY,
+  SESSION_TOKEN_KEY,
   consumeOAuthRememberPreference,
   getStoredSessionToken,
   storeOAuthRememberPreference,
@@ -94,12 +96,17 @@ type OAuthRedeemResponse = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const ALLOW_REMEMBER_ME = process.env.NEXT_PUBLIC_ALLOW_REMEMBER_ME !== "false";
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const targetLanguages = ["English", "Turkish", "Spanish", "French", "German", "Italian"];
 
 function getSessionToken() {
   if (typeof window === "undefined") {
     return "";
+  }
+  if (!ALLOW_REMEMBER_ME) {
+    window.localStorage.removeItem(REMEMBERED_SESSION_TOKEN_KEY);
+    return window.sessionStorage.getItem(SESSION_TOKEN_KEY) ?? "";
   }
   return getStoredSessionToken(window.sessionStorage, window.localStorage);
 }
@@ -108,7 +115,7 @@ function storeSessionToken(token?: string | null, remember = false) {
   if (typeof window === "undefined") {
     return;
   }
-  persistSessionToken(window.sessionStorage, window.localStorage, token, remember);
+  persistSessionToken(window.sessionStorage, window.localStorage, token, remember && ALLOW_REMEMBER_ME);
 }
 
 function authHeaders(): Record<string, string> {
@@ -253,7 +260,7 @@ export default function Home() {
     } else if (oauth === "success") {
       setAuthMessage("Finishing sign-in...");
       void (async () => {
-        const rememberOAuth = consumeOAuthRememberPreference(window.localStorage);
+        const rememberOAuth = ALLOW_REMEMBER_ME && consumeOAuthRememberPreference(window.localStorage);
         try {
           const payload = handoff
             ? await apiJson<OAuthRedeemResponse>("/api/auth/oauth/redeem", {
@@ -900,7 +907,7 @@ export default function Home() {
     if (!provider.authorization_url) {
       return;
     }
-    storeOAuthRememberPreference(window.localStorage, rememberMe);
+    storeOAuthRememberPreference(window.localStorage, rememberMe && ALLOW_REMEMBER_ME);
     window.location.href = provider.authorization_url;
   }
 
@@ -1183,6 +1190,11 @@ export default function Home() {
               </button>
             </div>
 
+            <p className="muted-copy">
+              Privacy: text and uploaded files are sent to Gemini for analysis. Generated audio sends selected text to
+              the configured TTS provider only when you choose Generated audio.
+            </p>
+
             {error ? <div className="error">{error}</div> : null}
           </div>
         </form>
@@ -1284,7 +1296,7 @@ export default function Home() {
                     </div>
                   ) : null}
 
-                  {authMode !== "reset" ? (
+                  {authMode !== "reset" && ALLOW_REMEMBER_ME ? (
                     <label className="check-row" htmlFor="remember-me">
                       <input
                         checked={rememberMe}
@@ -1297,6 +1309,9 @@ export default function Home() {
                         <small>Only use this on your own device.</small>
                       </span>
                     </label>
+                  ) : null}
+                  {authMode !== "reset" && !ALLOW_REMEMBER_ME ? (
+                    <p className="muted-copy">Remember me is disabled for this deployment; sign-in is session-only.</p>
                   ) : null}
 
                   <button className="primary-button" disabled={authLoading} type="submit">

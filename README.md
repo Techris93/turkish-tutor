@@ -84,6 +84,8 @@ AUTH_COOKIE_SAMESITE=lax
 
 The API creates the required tables at startup. User passwords are hashed with Argon2. Browser sessions use HTTP-only cookies, so the frontend must call the API with credentials enabled. For browsers that do not reliably keep the API cookie after a cross-subdomain OAuth redirect, the app also keeps the current session token in `sessionStorage` for that tab and sends it as `X-Session-Token`; logout invalidates the same server-side session. If the learner checks `Remember me`, the same fallback token is also stored in `localStorage` on that device so the app can restore the account after the browser is closed.
 
+For the most secure setup, put the web and API behind a shared custom domain so HTTP-only cookies work reliably, then set `NEXT_PUBLIC_ALLOW_REMEMBER_ME=false` to hide Remember me and ignore remembered `localStorage` tokens. Keep it `true` only for personal/trusted-device deployments that need the Render cross-subdomain fallback.
+
 For a local password-reset test without sending email, set:
 
 ```bash
@@ -127,7 +129,7 @@ Deploy steps:
 
 The frontend is configured with `NEXT_PUBLIC_API_URL=https://turkish-tutor-api.onrender.com`, and the API allows CORS from `https://turkish-tutor-web.onrender.com`. The API receives `DATABASE_URL` from the Blueprint-managed Postgres database, and production cookies use `AUTH_COOKIE_SECURE=true` plus `AUTH_COOKIE_SAMESITE=none`. If you rename services in Render, update those values in `render.yaml`.
 
-Production hardening defaults in the Blueprint disable FastAPI docs/OpenAPI, cap text/file study inputs, and add API/static-site security headers. If you use a custom frontend or API domain, update `FRONTEND_ORIGIN`, `PUBLIC_API_URL`, `NEXT_PUBLIC_API_URL`, OAuth redirect URLs, and the static CSP in `web/public/_headers`.
+Production hardening defaults in the Blueprint disable FastAPI docs/OpenAPI, cap text/file study inputs, enable Origin checks for cookie-authenticated mutations, and add API/static-site security headers. If you use a custom frontend or API domain, update `FRONTEND_ORIGIN`, `PUBLIC_API_URL`, `NEXT_PUBLIC_API_URL`, OAuth redirect URLs, and `NEXT_PUBLIC_CSP_CONNECT_SRC`. The static `_headers` file is regenerated during `npm run build`.
 
 Render syncs `sync: false` secrets only during initial Blueprint creation. Set or update these secrets manually in the Render Dashboard as needed:
 
@@ -268,10 +270,11 @@ Use `Remember me` only on your own device. Logout clears both the session-only t
 
 ### Rate Limiting
 
-The API includes a lightweight in-process limiter. Defaults can be overridden with:
+The API includes a lightweight limiter. Defaults can be overridden with:
 
 ```bash
 RATE_LIMIT_ENABLED=true
+RATE_LIMIT_BACKEND=memory
 RATE_LIMIT_SIGNUP=5/1h
 RATE_LIMIT_LOGIN=10/5m
 RATE_LIMIT_PASSWORD_RESET=5/1h
@@ -281,7 +284,7 @@ RATE_LIMIT_LESSON_WRITE=120/1h
 RATE_LIMIT_TTS=120/1h
 ```
 
-The limiter is intentionally simple for this small app and protects sign-up, login, password reset, OAuth, lesson writes, Gemini-backed study requests, and generated TTS requests. If you run multiple API instances or open this app to broader public traffic, replace it with Redis or another shared rate limiter.
+The default `memory` backend is intentionally simple for this small app and protects sign-up, login, password reset, OAuth, lesson writes, Gemini-backed study requests, and generated TTS requests. If you run multiple API instances or open this app to broader public traffic, set `RATE_LIMIT_BACKEND=redis` and `REDIS_URL` to use shared Redis counters.
 
 Current production setup still required:
 

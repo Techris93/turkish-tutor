@@ -363,7 +363,7 @@ async def run_study_analysis(
     target_language = options.get("target") or options.get("language") or "English"
 
     try:
-        extracted = extract_content(payload, current_level=session.cefr_level)
+        extracted = extract_content(payload, current_level=session.cefr_level, allow_paths=True)
     except ExtractionError as exc:
         print(f"\n  {RED}Could not extract input:{RESET} {exc}")
         return

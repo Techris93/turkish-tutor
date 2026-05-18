@@ -76,6 +76,10 @@ class AuthLessonTests(unittest.TestCase):
             "GOOGLE_OAUTH_REDIRECT_URI",
             "OAUTH_SUCCESS_REDIRECT_URL",
             "OAUTH_ERROR_REDIRECT_URL",
+            "AUTH_COOKIE_SAMESITE",
+            "AUTH_COOKIE_SECURE",
+            "MAX_UPLOAD_BYTES",
+            "MAX_TEXT_INPUT_CHARS",
         ]:
             os.environ.pop(key, None)
         limiter.clear()
@@ -326,7 +330,7 @@ class AuthLessonTests(unittest.TestCase):
 
     def test_oauth_redeem_rejects_invalid_and_expired_handoff(self):
         self.assertEqual(
-            self.client.post("/api/auth/oauth/redeem", json={"handoff": "missing"}).status_code,
+            self.client.post("/api/auth/oauth/redeem", json={"handoff": "missing-handoff-token"}).status_code,
             400,
         )
         signed_in = self.signup("handoff@example.com")
@@ -392,6 +396,67 @@ class AuthLessonTests(unittest.TestCase):
         )
         self.assertEqual(limited.status_code, 429)
         self.assertIn("Too many requests", limited.json()["detail"])
+
+    def test_security_headers_and_samesite_none_secure_cookie(self):
+        health = self.client.get("/api/health")
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(health.headers["x-frame-options"], "DENY")
+        self.assertIn("camera=()", health.headers["permissions-policy"])
+
+        os.environ["AUTH_COOKIE_SAMESITE"] = "none"
+        os.environ["AUTH_COOKIE_SECURE"] = "false"
+        response = TestClient(api.app).post(
+            "/api/auth/signup",
+            json={"email": "cookie@example.com", "password": "password123", "name": "Cookie User"},
+        )
+        self.assertEqual(response.status_code, 201)
+        cookie = response.headers["set-cookie"].lower()
+        self.assertIn("samesite=none", cookie)
+        self.assertIn("secure", cookie)
+
+    def test_study_rejects_unsupported_and_oversized_uploads(self):
+        unsupported = self.client.post(
+            "/api/study",
+            data={"level": "A1", "target_language": "English"},
+            files={"file": ("payload.exe", b"not text", "application/octet-stream")},
+        )
+        self.assertEqual(unsupported.status_code, 400)
+        self.assertIn("Unsupported input file type", unsupported.json()["detail"])
+
+        os.environ["MAX_UPLOAD_BYTES"] = "4"
+        too_large = self.client.post(
+            "/api/study",
+            data={"level": "A1", "target_language": "English"},
+            files={"file": ("lesson.txt", b"Merhaba", "text/plain")},
+        )
+        self.assertEqual(too_large.status_code, 400)
+        self.assertIn("too large", too_large.json()["detail"])
+
+    def test_study_rejects_oversized_text_input(self):
+        os.environ["MAX_TEXT_INPUT_CHARS"] = "5"
+        response = self.client.post(
+            "/api/study",
+            data={"text": "Merhaba", "level": "A1", "target_language": "English"},
+        )
+        self.assertEqual(response.status_code, 413)
+
+    def test_study_text_flow_does_not_resolve_server_paths(self):
+        secret_path = Path(self.tmpdir.name) / "secret.txt"
+        secret_path.write_text("SECRET_VALUE", encoding="utf-8")
+        with (
+            patch.object(api, "extract_vocabulary_items", return_value=[]),
+            patch.object(api, "ask_llm", new=AsyncMock(return_value="Safe study note.")),
+        ):
+            response = self.client.post(
+                "/api/study",
+                data={"text": str(secret_path), "level": "A1", "target_language": "English"},
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["source_type"], "typed-text")
+        self.assertIn("secret.txt", payload["preview"])
+        self.assertNotIn("SECRET_VALUE", payload["preview"])
 
     def test_saved_lesson_crud_and_cross_user_protection(self):
         owner = self.signup("owner@example.com")

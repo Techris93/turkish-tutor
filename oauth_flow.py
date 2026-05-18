@@ -147,6 +147,8 @@ async def fetch_google_profile(client: httpx.AsyncClient, access_token: str) -> 
     email = str(payload.get("email") or "").strip().lower()
     if not email:
         raise OAuthError("Google account did not provide an email address.")
+    if payload.get("email_verified") is not True:
+        raise OAuthError("Google account email is not verified.")
     return OAuthProfile(
         email=email,
         name=str(payload.get("name") or email.split("@", 1)[0]),

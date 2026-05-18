@@ -127,6 +127,8 @@ Deploy steps:
 
 The frontend is configured with `NEXT_PUBLIC_API_URL=https://turkish-tutor-api.onrender.com`, and the API allows CORS from `https://turkish-tutor-web.onrender.com`. The API receives `DATABASE_URL` from the Blueprint-managed Postgres database, and production cookies use `AUTH_COOKIE_SECURE=true` plus `AUTH_COOKIE_SAMESITE=none`. If you rename services in Render, update those values in `render.yaml`.
 
+Production hardening defaults in the Blueprint disable FastAPI docs/OpenAPI, cap text/file study inputs, and add API/static-site security headers. If you use a custom frontend or API domain, update `FRONTEND_ORIGIN`, `PUBLIC_API_URL`, `NEXT_PUBLIC_API_URL`, OAuth redirect URLs, and the static CSP in `web/public/_headers`.
+
 Render syncs `sync: false` secrets only during initial Blueprint creation. Set or update these secrets manually in the Render Dashboard as needed:
 
 - `GEMINI_API_KEY`

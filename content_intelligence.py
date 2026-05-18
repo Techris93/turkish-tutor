@@ -20,6 +20,7 @@ TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".tsv", ".json", ".srt"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 PDF_EXTENSIONS = {".pdf"}
 DOC_EXTENSIONS = {".docx"}
+SUPPORTED_FILE_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | PDF_EXTENSIONS | DOC_EXTENSIONS
 TURKISH_CHARACTERS = set("çğıöşüÇĞİÖŞÜ")
 COMMON_TURKISH_WORDS = {
     "ben", "sen", "o", "biz", "siz", "onlar", "ve", "bir", "bu", "şu",
@@ -426,7 +427,7 @@ def extract_text_from_file(path: str | os.PathLike[str]) -> tuple[str, str]:
     )
 
 
-def extract_content(raw_input: str, current_level: str = "A1") -> ExtractedContent:
+def extract_content(raw_input: str, current_level: str = "A1", allow_paths: bool = False) -> ExtractedContent:
     """Extract content from direct text or a local file path."""
     raw_input = raw_input.strip()
     if not raw_input:
@@ -434,7 +435,7 @@ def extract_content(raw_input: str, current_level: str = "A1") -> ExtractedConte
 
     candidate = raw_input[1:] if raw_input.startswith("@") else raw_input
     expanded = Path(candidate).expanduser()
-    if expanded.exists():
+    if allow_paths and expanded.exists():
         text, source_type = extract_text_from_file(expanded)
         label = str(expanded.resolve())
     else:

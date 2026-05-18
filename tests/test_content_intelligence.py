@@ -25,10 +25,18 @@ class ContentIntelligenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "lesson.txt"
             path.write_text("A2\nMarkete gidiyorum.", encoding="utf-8")
-            content = extract_content(str(path), current_level="A1")
+            content = extract_content(str(path), current_level="A1", allow_paths=True)
         self.assertEqual(content.source_type, "text-file")
         self.assertEqual(content.inferred_level, "A2")
         self.assertIn("Markete", content.text)
+
+    def test_direct_input_does_not_read_paths_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "secret.txt"
+            path.write_text("SECRET_VALUE", encoding="utf-8")
+            content = extract_content(str(path), current_level="A1")
+        self.assertEqual(content.source_type, "typed-text")
+        self.assertNotIn("SECRET_VALUE", content.text)
 
     def test_infers_higher_level_for_complex_text(self):
         text = (

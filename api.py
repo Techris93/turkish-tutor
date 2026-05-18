@@ -54,6 +54,7 @@ from content_intelligence import (
     CEFR_LEVELS as CEFR_LEVEL_NAMES,
     ExtractedContent,
     ExtractionError,
+    SUPPORTED_FILE_EXTENSIONS,
     build_study_prompt,
     extract_content,
     extract_text_from_file,
@@ -100,6 +101,8 @@ DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_TEXT_INPUT_CHARS = 30_000
 
 
 class StudyUnit(BaseModel):
@@ -149,14 +152,14 @@ class UserResponse(BaseModel):
 
 
 class SignupRequest(BaseModel):
-    email: str
-    password: str
-    name: str = ""
+    email: str = Field(..., max_length=320)
+    password: str = Field(..., max_length=256)
+    name: str = Field("", max_length=120)
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str = Field(..., max_length=320)
+    password: str = Field(..., max_length=256)
 
 
 class AuthResponse(BaseModel):
@@ -165,7 +168,7 @@ class AuthResponse(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
-    email: str
+    email: str = Field(..., max_length=320)
 
 
 class PasswordResetRequestResponse(BaseModel):
@@ -175,8 +178,8 @@ class PasswordResetRequestResponse(BaseModel):
 
 
 class PasswordResetConfirmRequest(BaseModel):
-    token: str
-    password: str
+    token: str = Field(..., min_length=16, max_length=256)
+    password: str = Field(..., max_length=256)
 
 
 class OAuthProvider(BaseModel):
@@ -190,16 +193,16 @@ class OAuthConfigResponse(BaseModel):
 
 
 class OAuthRedeemRequest(BaseModel):
-    handoff: str
+    handoff: str = Field(..., min_length=16, max_length=256)
 
 
 class SavedLessonCreate(BaseModel):
-    title: str
+    title: str = Field(..., max_length=180)
     result: StudyResponse
 
 
 class SavedLessonUpdate(BaseModel):
-    title: Optional[str] = None
+    title: Optional[str] = Field(None, max_length=180)
     result: Optional[StudyResponse] = None
 
 
@@ -311,12 +314,35 @@ def normalize_level(level: str, fallback: str = "A1") -> str:
 
 def allowed_origins() -> List[str]:
     configured = os.environ.get("FRONTEND_ORIGIN") or os.environ.get("FRONTEND_ORIGINS", "")
-    origins = DEFAULT_ALLOWED_ORIGINS[:]
+    origins = [] if os.environ.get("RENDER", "").lower() == "true" else DEFAULT_ALLOWED_ORIGINS[:]
     for origin in configured.split(","):
         origin = origin.strip().rstrip("/")
         if origin and origin not in origins:
             origins.append(origin)
     return origins
+
+
+def env_int(name: str, fallback: int) -> int:
+    try:
+        value = int(os.environ.get(name, ""))
+    except ValueError:
+        return fallback
+    return value if value > 0 else fallback
+
+
+def max_upload_bytes() -> int:
+    return env_int("MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES)
+
+
+def max_text_input_chars() -> int:
+    return env_int("MAX_TEXT_INPUT_CHARS", DEFAULT_MAX_TEXT_INPUT_CHARS)
+
+
+def api_docs_enabled() -> bool:
+    configured = os.environ.get("ENABLE_API_DOCS")
+    if configured is not None:
+        return configured.lower() in {"1", "true", "yes", "on"}
+    return os.environ.get("RENDER", "").lower() != "true"
 
 
 def model_dump(model: BaseModel) -> Dict[str, Any]:
@@ -370,24 +396,26 @@ def cookie_samesite() -> str:
 
 def set_session_cookie(response: Response, token: str) -> None:
     max_age = int(os.environ.get("AUTH_SESSION_DAYS", "30")) * 24 * 60 * 60
+    same_site = cookie_samesite()
     response.set_cookie(
         SESSION_COOKIE_NAME,
         token,
         max_age=max_age,
         httponly=True,
-        secure=cookie_secure(),
-        samesite=cookie_samesite(),  # type: ignore[arg-type]
+        secure=cookie_secure() or same_site == "none",
+        samesite=same_site,  # type: ignore[arg-type]
         path="/",
     )
 
 
 def clear_session_cookie(response: Response) -> None:
+    same_site = cookie_samesite()
     response.delete_cookie(
         SESSION_COOKIE_NAME,
         path="/",
         httponly=True,
-        secure=cookie_secure(),
-        samesite=cookie_samesite(),  # type: ignore[arg-type]
+        secure=cookie_secure() or same_site == "none",
+        samesite=same_site,  # type: ignore[arg-type]
     )
 
 
@@ -449,34 +477,52 @@ def optional_current_user(request: Request, db: Session) -> Optional[User]:
 
 
 async def extract_upload(upload: UploadFile, current_level: str) -> ExtractedContent:
-    suffix = Path(upload.filename or "upload").suffix
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
-        temp_path = Path(handle.name)
-        while chunk := await upload.read(1024 * 1024):
-            handle.write(chunk)
+    source_label = Path(upload.filename or "uploaded file").name
+    suffix = Path(source_label).suffix.lower()
+    if suffix not in SUPPORTED_FILE_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_FILE_EXTENSIONS))
+        raise ExtractionError(f"Unsupported input file type '{suffix or '(none)'}'. Supported: {supported}.")
 
+    total_bytes = 0
+    byte_limit = max_upload_bytes()
+    temp_path: Optional[Path] = None
     try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+            temp_path = Path(handle.name)
+            while chunk := await upload.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > byte_limit:
+                    raise ExtractionError(f"Uploaded file is too large. Limit is {byte_limit // (1024 * 1024)} MB.")
+                handle.write(chunk)
+
         text, source_type = extract_text_from_file(temp_path)
         text = normalize_text(text)
         if not text:
-            raise ExtractionError(f"No readable text found in {upload.filename or 'upload'}.")
+            raise ExtractionError(f"No readable text found in {source_label}.")
         units = extract_turkish_units(text)
         inferred_level = infer_cefr_level(text, fallback=current_level)
         return ExtractedContent(
             source_type=source_type,
-            source_label=upload.filename or "uploaded file",
+            source_label=source_label,
             text=text,
             units=units,
             inferred_level=inferred_level,
         )
     finally:
-        try:
-            temp_path.unlink()
-        except OSError:
-            pass
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
 
 
-app = FastAPI(title="Turkce Hoca API", version="1.0.0")
+app = FastAPI(
+    title="Turkce Hoca API",
+    version="1.0.0",
+    docs_url="/docs" if api_docs_enabled() else None,
+    redoc_url="/redoc" if api_docs_enabled() else None,
+    openapi_url="/openapi.json" if api_docs_enabled() else None,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins(),
@@ -484,6 +530,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):  # type: ignore[no-untyped-def]
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if not api_docs_enabled():
+        response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+    if request.url.path.startswith(("/api/auth", "/api/lessons", "/api/study", "/api/tts/audio")):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 @app.on_event("startup")
@@ -910,6 +970,9 @@ async def study(
 ) -> StudyResponse:
     rate_limit(request, "study", RateLimitRule(30, 3600))
     requested_level = normalize_level(level)
+    target_language = target_language.strip()[:80] or "English"
+    if len(text) > max_text_input_chars():
+        raise HTTPException(status_code=413, detail=f"Text input is too large. Limit is {max_text_input_chars()} characters.")
     try:
         if file and file.filename:
             extracted = await extract_upload(file, requested_level)

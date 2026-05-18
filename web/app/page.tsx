@@ -170,6 +170,7 @@ export default function Home() {
   const [playbackNotice, setPlaybackNotice] = useState("");
   const [pwaReady, setPwaReady] = useState(false);
   const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>("browser");
+  const [workspaceTab, setWorkspaceTab] = useState<"account" | "lessons" | "audio">("account");
   const [ttsConfig, setTtsConfig] = useState<TTSConfigResponse | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const [activeEngine, setActiveEngine] = useState<"generated" | "browser" | "idle">("idle");
@@ -1138,11 +1139,7 @@ export default function Home() {
           <div className="panel-body">
             <div className="field">
               <label htmlFor="text-input">Text</label>
-              <textarea
-                id="text-input"
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-              />
+              <textarea id="text-input" value={text} onChange={(event) => setText(event.target.value)} />
             </div>
 
             <div className="field">
@@ -1159,634 +1156,517 @@ export default function Home() {
               <label>Level</label>
               <div className="segmented">
                 {levels.map((item) => (
-                  <button
-                    className={item === level ? "active" : ""}
-                    key={item}
-                    type="button"
-                    onClick={() => setLevel(item)}
-                  >
+                  <button className={item === level ? "active" : ""} key={item} type="button" onClick={() => setLevel(item)}>
                     {item}
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="form-grid">
-              <div className="field">
-                <label htmlFor="target-language">Target</label>
-                <select
-                  id="target-language"
-                  value={targetLanguage}
-                  onChange={(event) => setTargetLanguage(event.target.value)}
-                >
-                  {targetLanguages.map((language) => (
-                    <option key={language}>{language}</option>
-                  ))}
-                </select>
-              </div>
-              <button className="primary-button" disabled={loading} type="submit">
-                {loading ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-                Analyze
-              </button>
+            <div className="field">
+              <label htmlFor="target-language">Target</label>
+              <select id="target-language" value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value)}>
+                {targetLanguages.map((language) => (
+                  <option key={language}>{language}</option>
+                ))}
+              </select>
             </div>
 
-            <p className="muted-copy">
-              Privacy: text and uploaded files are sent to Gemini for analysis. Generated audio sends selected text to
-              the configured TTS provider only when you choose Generated audio.
-            </p>
+            <button className="primary-button" disabled={loading} type="submit">
+              {loading ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
+              Analyze
+            </button>
 
+            <p className="muted-copy">
+              Privacy: text and uploaded files are sent to Gemini for analysis. Generated audio sends selected text only
+              when you choose Generated audio.
+            </p>
             {error ? <div className="error">{error}</div> : null}
           </div>
         </form>
 
-        <div className="result-stack">
-          <section className="panel">
-            <div className="panel-header">
-              <div className="panel-title">
-                {user ? <KeyRound size={18} /> : authMode === "signup" ? <UserPlus size={18} /> : <LogIn size={18} />}
-                <h2>{user ? "Account" : "Sign In"}</h2>
-              </div>
-            </div>
-            <div className="panel-body">
-              {user ? (
-                <div className="account-box">
-                  <div>
-                    <strong>{user.name}</strong>
-                    <span>{user.email}</span>
+        <section className="panel tab-panel">
+          <div className="tab-list" role="tablist" aria-label="Workspace tools">
+            <button
+              className={workspaceTab === "account" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={workspaceTab === "account"}
+              onClick={() => setWorkspaceTab("account")}
+            >
+              {user ? <KeyRound size={15} /> : authMode === "signup" ? <UserPlus size={15} /> : <LogIn size={15} />}
+              Account
+            </button>
+            <button
+              className={workspaceTab === "lessons" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={workspaceTab === "lessons"}
+              onClick={() => setWorkspaceTab("lessons")}
+            >
+              <BookOpen size={15} />
+              Lessons ({lessonsLoading ? "..." : savedLessons.length})
+            </button>
+            <button
+              className={workspaceTab === "audio" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={workspaceTab === "audio"}
+              onClick={() => setWorkspaceTab("audio")}
+            >
+              <Headphones size={15} />
+              Read Aloud
+            </button>
+          </div>
+
+          <div className="panel-body tab-body">
+            {workspaceTab === "account" ? (
+              <>
+                {user ? (
+                  <div className="account-box">
+                    <div>
+                      <strong>{user.name}</strong>
+                      <span>{user.email}</span>
+                    </div>
+                    <button className="ghost-button" disabled={authLoading} type="button" onClick={logout}>
+                      <LogOut size={18} />
+                      Logout
+                    </button>
                   </div>
-                  <button className="ghost-button" disabled={authLoading} type="button" onClick={logout}>
-                    <LogOut size={18} />
-                    Logout
-                  </button>
-                </div>
-              ) : (
-                <form className="auth-form" onSubmit={submitAuth}>
-                  <div className="auth-tabs">
-                    <button
-                      className={authMode === "login" ? "active" : ""}
-                      type="button"
-                      onClick={() => setAuthMode("login")}
-                    >
-                      Login
-                    </button>
-                    <button
-                      className={authMode === "signup" ? "active" : ""}
-                      type="button"
-                      onClick={() => setAuthMode("signup")}
-                    >
-                      Sign up
-                    </button>
-                    <button
-                      className={authMode === "reset" ? "active" : ""}
-                      type="button"
-                      onClick={() => setAuthMode("reset")}
-                    >
-                      Reset
-                    </button>
-                  </div>
-
-                  {authMode === "signup" ? (
-                    <div className="field compact-field">
-                      <label htmlFor="auth-name">Name</label>
-                      <input
-                        id="auth-name"
-                        type="text"
-                        autoComplete="name"
-                        value={authName}
-                        onChange={(event) => setAuthName(event.target.value)}
-                      />
-                    </div>
-                  ) : null}
-
-                  <div className="auth-grid">
-                    <div className="field compact-field">
-                      <label htmlFor="auth-email">Email</label>
-                      <input
-                        id="auth-email"
-                        type="email"
-                        autoComplete="email"
-                        value={authEmail}
-                        onChange={(event) => setAuthEmail(event.target.value)}
-                      />
-                    </div>
-                    <div className="field compact-field">
-                      <label htmlFor="auth-password">
-                        {authMode === "reset" && resetToken ? "New password" : "Password"}
-                      </label>
-                      <input
-                        id="auth-password"
-                        type="password"
-                        autoComplete={authMode === "login" ? "current-password" : "new-password"}
-                        value={authPassword}
-                        onChange={(event) => setAuthPassword(event.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  {authMode === "reset" ? (
-                    <div className="field compact-field">
-                      <label htmlFor="reset-token">Reset token</label>
-                      <input
-                        id="reset-token"
-                        type="text"
-                        placeholder="Paste token after email delivery is configured"
-                        value={resetToken}
-                        onChange={(event) => setResetToken(event.target.value)}
-                      />
-                    </div>
-                  ) : null}
-
-                  {authMode !== "reset" && ALLOW_REMEMBER_ME ? (
-                    <label className="check-row" htmlFor="remember-me">
-                      <input
-                        checked={rememberMe}
-                        id="remember-me"
-                        type="checkbox"
-                        onChange={(event) => setRememberMe(event.target.checked)}
-                      />
-                      <span>
-                        <strong>Remember me</strong>
-                        <small>Only use this on your own device.</small>
-                      </span>
-                    </label>
-                  ) : null}
-                  {authMode !== "reset" && !ALLOW_REMEMBER_ME ? (
-                    <p className="muted-copy">Remember me is disabled for this deployment; sign-in is session-only.</p>
-                  ) : null}
-
-                  <button className="primary-button" disabled={authLoading} type="submit">
-                    {authLoading ? <Loader2 className="spin" size={18} /> : <KeyRound size={18} />}
-                    {authMode === "signup" ? "Create account" : authMode === "reset" && !resetToken ? "Request reset" : "Continue"}
-                  </button>
-                </form>
-              )}
-
-              {oauthProviders.length ? (
-                <div className="oauth-row">
-                  {oauthProviders.map((provider) => (
-                    <button
-                      className="ghost-button"
-                      disabled={!provider.authorization_url}
-                      key={provider.provider}
-                      type="button"
-                      onClick={() => startOAuth(provider)}
-                      title={
-                        provider.authorization_url
-                          ? `Continue with ${provider.provider}.`
-                          : provider.configured
-                            ? `${provider.provider} credentials are configured; callback routes still need to be wired.`
-                          : `${provider.provider} OAuth is not configured yet.`
-                      }
-                    >
-                      {provider.provider} OAuth
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {authError ? <div className="error">{authError}</div> : null}
-              {authMessage ? <div className="success">{authMessage}</div> : null}
-              {!user ? (
-                <p className="muted-copy">
-                  Sign in to sync saved lessons across refreshes and devices. Local lessons stay available until you import them.
-                </p>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="panel">
-            <div className="panel-header">
-              <div className="panel-title">
-                <BookOpen size={18} />
-                <h2>Saved Lessons</h2>
-              </div>
-              <strong>{lessonsLoading ? "..." : savedLessons.length}</strong>
-            </div>
-            <div className="panel-body">
-              {user && localLessons.length ? (
-                <div className="revision-banner">
-                  You have {localLessons.length} local lesson{localLessons.length === 1 ? "" : "s"} from this browser.
-                  <button className="inline-button" disabled={lessonsLoading} type="button" onClick={importLocalLessons}>
-                    Import to account
-                  </button>
-                </div>
-              ) : null}
-              <div className="lesson-save-row">
-                <input
-                  aria-label="Lesson title"
-                  disabled={!result}
-                  placeholder="Lesson title"
-                  type="text"
-                  value={lessonTitle}
-                  onChange={(event) => setLessonTitle(event.target.value)}
-                />
-                <button className="ghost-button" disabled={!result} type="button" onClick={saveLesson}>
-                  {activeLessonId ? "Update" : "Save"}
-                </button>
-              </div>
-              {lessonError ? <div className="error">{lessonError}</div> : null}
-              {!user ? (
-                <p className="muted-copy">Not signed in: lessons are saved only in this browser until you log in.</p>
-              ) : null}
-              <div className="search-box lesson-search">
-                <Search size={16} />
-                <input
-                  aria-label="Search saved lessons"
-                  placeholder="Search saved lessons"
-                  value={lessonSearch}
-                  onChange={(event) => setLessonSearch(event.target.value)}
-                />
-              </div>
-              {filteredLessons.length ? (
-                <div className="lesson-list">
-                  {filteredLessons.map((lesson) => (
-                    <article
-                      className={`lesson-card ${lesson.id === activeLessonId ? "active" : ""}`}
-                      key={lesson.id}
-                    >
-                      <button className="lesson-open" type="button" onClick={() => openLesson(lesson)}>
-                        <strong>{lesson.title}</strong>
-                        <span>
-                          {lesson.result.study_level} · {lesson.result.target_language} ·{" "}
-                          {new Date(lesson.created_at).toLocaleDateString()}
-                        </span>
+                ) : (
+                  <form className="auth-form" onSubmit={submitAuth}>
+                    <div className="auth-tabs">
+                      <button className={authMode === "login" ? "active" : ""} type="button" onClick={() => setAuthMode("login")}>
+                        Login
                       </button>
-                      <div className="lesson-actions">
-                        <button
-                          className="icon-button"
-                          type="button"
-                          aria-label={`Rename ${lesson.title}`}
-                          onClick={() => {
-                            const title = window.prompt("Rename lesson", lesson.title);
-                            if (title !== null) {
-                              renameLesson(lesson, title);
-                            }
-                          }}
-                        >
-                          <RefreshCw size={16} />
-                        </button>
-                        <button
-                          className="icon-button"
-                          type="button"
-                          aria-label={`Delete ${lesson.title}`}
-                          onClick={() => deleteLesson(lesson)}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                      <button className={authMode === "signup" ? "active" : ""} type="button" onClick={() => setAuthMode("signup")}>
+                        Sign up
+                      </button>
+                      <button className={authMode === "reset" ? "active" : ""} type="button" onClick={() => setAuthMode("reset")}>
+                        Reset
+                      </button>
+                    </div>
+
+                    {authMode === "signup" ? (
+                      <div className="field compact-field">
+                        <label htmlFor="auth-name">Name</label>
+                        <input id="auth-name" type="text" autoComplete="name" value={authName} onChange={(event) => setAuthName(event.target.value)} />
                       </div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <p className="muted-copy">
-                  {user
-                    ? "Saved lessons from your account will appear here."
-                    : "Local saved lessons stay in this browser. Sign in to keep them across devices."}
-                </p>
-              )}
-            </div>
-          </section>
+                    ) : null}
 
-          <section className="panel">
-            <div className="panel-header">
-              <div className="panel-title">
-                <Headphones size={18} />
-                <h2>Read Aloud</h2>
-              </div>
-            </div>
-            <div className="panel-body">
-              <div className="tts-grid">
-                <div className="field">
-                  <label htmlFor="voice-select">Voice</label>
-                  <select
-                    id="voice-select"
-                    value={selectedVoice}
-                    onChange={(event) => setSelectedVoice(event.target.value)}
-                  >
-                    <option value="">Auto</option>
-                    {(turkishVoices.length ? turkishVoices : voices).map((voice) => (
-                      <option key={`${voice.name}-${voice.lang}`} value={voice.name}>
-                        {voice.name} · {voice.lang}
-                      </option>
+                    <div className="auth-grid">
+                      <div className="field compact-field">
+                        <label htmlFor="auth-email">Email</label>
+                        <input id="auth-email" type="email" autoComplete="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} />
+                      </div>
+                      <div className="field compact-field">
+                        <label htmlFor="auth-password">{authMode === "reset" && resetToken ? "New password" : "Password"}</label>
+                        <input
+                          id="auth-password"
+                          type="password"
+                          autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                          value={authPassword}
+                          onChange={(event) => setAuthPassword(event.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    {authMode === "reset" ? (
+                      <div className="field compact-field">
+                        <label htmlFor="reset-token">Reset token</label>
+                        <input
+                          id="reset-token"
+                          type="text"
+                          placeholder="Paste token after email delivery is configured"
+                          value={resetToken}
+                          onChange={(event) => setResetToken(event.target.value)}
+                        />
+                      </div>
+                    ) : null}
+
+                    {authMode !== "reset" && ALLOW_REMEMBER_ME ? (
+                      <label className="check-row" htmlFor="remember-me">
+                        <input checked={rememberMe} id="remember-me" type="checkbox" onChange={(event) => setRememberMe(event.target.checked)} />
+                        <span>
+                          <strong>Remember me</strong>
+                          <small>Only use this on your own device.</small>
+                        </span>
+                      </label>
+                    ) : null}
+
+                    <button className="primary-button" disabled={authLoading} type="submit">
+                      {authLoading ? <Loader2 className="spin" size={18} /> : <KeyRound size={18} />}
+                      {authMode === "signup" ? "Create account" : authMode === "reset" && !resetToken ? "Request reset" : "Continue"}
+                    </button>
+                  </form>
+                )}
+
+                {oauthProviders.length ? (
+                  <div className="oauth-row">
+                    {oauthProviders.map((provider) => (
+                      <button
+                        className="ghost-button"
+                        disabled={!provider.authorization_url}
+                        key={provider.provider}
+                        type="button"
+                        onClick={() => startOAuth(provider)}
+                        title={
+                          provider.authorization_url
+                            ? `Continue with ${provider.provider}.`
+                            : provider.configured
+                              ? `${provider.provider} credentials are configured; callback routes still need to be wired.`
+                              : `${provider.provider} OAuth is not configured yet.`
+                        }
+                      >
+                        {provider.provider} OAuth
+                      </button>
                     ))}
-                  </select>
-                </div>
-                <div className="field">
-                  <label htmlFor="playback-mode">Playback</label>
-                  <select
-                    id="playback-mode"
-                    value={playbackMode}
-                    onChange={(event) => setPlaybackMode(event.target.value as PlaybackMode)}
-                  >
-                    <option value="bilingual">Translation + Turkish</option>
-                    <option value="turkish">Turkish only</option>
-                    <option value="translation">Translation only</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label htmlFor="playback-engine">Engine</label>
-                  <select
-                    id="playback-engine"
-                    value={playbackEngine}
-                    onChange={(event) => setPlaybackEngine(event.target.value as PlaybackEngine)}
-                  >
-                    <option value="browser">Browser speech</option>
-                    <option value="generated">Generated audio</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label htmlFor="speech-rate">Rate</label>
-                  <div className="range-row">
-                    <input
-                      id="speech-rate"
-                      max="1.6"
-                      min="0.7"
-                      step="0.1"
-                      type="range"
-                      value={speechRate}
-                      onChange={(event) => changeSpeechRate(Number(event.target.value))}
-                    />
-                    <strong>{speechRate.toFixed(1)}x</strong>
                   </div>
-                </div>
-              </div>
-              <div className="player-buttons">
-                <button className="ghost-button" type="button" onClick={speak}>
-                  <Play size={18} />
-                  Play
-                </button>
-                <button
-                  className="ghost-button"
-                  disabled={!result?.vocabulary_cards.length}
-                  type="button"
-                  onClick={() =>
-                    startPlaybackQueue(
-                      wordPlaybackQueue(
-                        result?.vocabulary_cards ?? [],
-                        result?.target_language ?? targetLanguage,
-                        playbackMode
-                      ),
-                      "Words"
-                    )
-                  }
-                >
-                  <Play size={18} />
-                  Words
-                </button>
-                <button
-                  className="ghost-button"
-                  disabled={!result?.vocabulary_cards.length}
-                  type="button"
-                  onClick={() =>
-                    startPlaybackQueue(
-                      examplePlaybackQueue(
-                        result?.vocabulary_cards ?? [],
-                        result?.target_language ?? targetLanguage,
-                        playbackMode
-                      ),
-                      "Examples"
-                    )
-                  }
-                >
-                  <Play size={18} />
-                  Examples
-                </button>
-                <button
-                  className="ghost-button"
-                  disabled={!speaking}
-                  type="button"
-                  onClick={pauseOrResume}
-                >
-                  {paused ? <RefreshCw size={18} /> : <Pause size={18} />}
-                  {paused ? "Resume" : "Pause"}
-                </button>
-                <button
-                  aria-label="Previous item"
-                  className="icon-button"
-                  disabled={!speaking || playbackTotal < 2}
-                  type="button"
-                  onClick={() => skipPlayback(-1)}
-                >
-                  <SkipBack size={18} />
-                </button>
-                <button
-                  aria-label="Next item"
-                  className="icon-button"
-                  disabled={!speaking || playbackTotal < 2}
-                  type="button"
-                  onClick={() => skipPlayback(1)}
-                >
-                  <SkipForward size={18} />
-                </button>
-                <button
-                  aria-label="Stop playback"
-                  className="icon-button"
-                  disabled={!speaking}
-                  type="button"
-                  onClick={stopSpeech}
-                >
-                  <Square size={18} />
-                </button>
-              </div>
-              <div className="playback-status" aria-live="polite">
-                <span>{speaking ? playbackLabel || "Read Aloud" : "Background playback"}</span>
-                <strong>
-                  {audioLoading
-                    ? "Generating..."
-                    : speaking
-                      ? `${playbackProgress(playbackCurrent, playbackTotal)} · ${
-                          activeEngine === "generated" ? "audio" : "speech"
-                        }`
-                      : ttsConfig?.configured
-                        ? `${ttsConfig.provider} ready`
-                        : pwaReady
-                          ? "PWA ready"
-                          : "Browser speech"}
-                </strong>
-              </div>
-              <p className="muted-copy">
-                Browser speech is the default and does not call the generated-audio API. Select Generated audio only when
-                you want provider audio for stronger mobile background playback; it may use paid API credits.
-              </p>
-              {!ttsConfig?.configured && playbackEngine !== "browser" ? (
-                <p className="voice-warning">
-                  Generated audio is not configured. Add OpenAI TTS settings on the API, or choose Browser speech.
-                </p>
-              ) : null}
-              {ttsConfig?.configured && !user ? (
-                <p className="voice-warning">Sign in to use generated audio. Browser speech still works without an account.</p>
-              ) : null}
-              {playbackNotice ? <p className="voice-warning">{playbackNotice}</p> : null}
-              {!turkishVoices.length ? (
-                <p className="voice-warning">
-                  No Turkish browser voice is currently available. Playback will use the closest installed voice.
-                </p>
-              ) : null}
-            </div>
-          </section>
+                ) : null}
 
-          {!result ? (
-            <section className="panel empty-state">
-              <div>
-                <Upload size={34} />
-                <p>Study output will appear here.</p>
-              </div>
-            </section>
-          ) : (
-            <>
-              <section className="panel">
-                <div className="panel-header">
-                  <div className="panel-title">
-                    <FileText size={18} />
-                    <h2>{activeLesson ? "Saved Lesson" : "Extracted"}</h2>
-                  </div>
-                </div>
-                <div className="panel-body">
-                  {activeLesson ? (
-                    <div className="revision-banner">
-                      Revising saved lesson: <strong>{activeLesson.title}</strong>
-                    </div>
-                  ) : null}
-                  <div className="meta-grid">
-                    <div className="meta-item">
-                      <span>Source</span>
-                      <strong>{result.source_type}</strong>
-                    </div>
-                    <div className="meta-item">
-                      <span>Inferred</span>
-                      <strong>{result.inferred_level}</strong>
-                    </div>
-                    <div className="meta-item">
-                      <span>Studying</span>
-                      <strong>{result.study_level}</strong>
-                    </div>
-                    <div className="meta-item">
-                      <span>Target</span>
-                      <strong>{result.target_language}</strong>
-                    </div>
-                  </div>
-                  <div className="field" style={{ marginTop: 16 }}>
-                    <label>Preview</label>
-                    <div className="preview">{result.preview}</div>
-                  </div>
-                </div>
-              </section>
+                {authError ? <div className="error">{authError}</div> : null}
+                {authMessage ? <div className="success">{authMessage}</div> : null}
+                {!user ? (
+                  <p className="muted-copy">
+                    Sign in to sync saved lessons across refreshes and devices. Local lessons stay available until you import them.
+                  </p>
+                ) : null}
+              </>
+            ) : null}
 
-              <section className="panel">
-                <div className="panel-header">
-                  <div className="panel-title">
-                    <FileText size={18} />
-                    <h2>Vocabulary Cards</h2>
+            {workspaceTab === "lessons" ? (
+              <>
+                {user && localLessons.length ? (
+                  <div className="revision-banner">
+                    You have {localLessons.length} local lesson{localLessons.length === 1 ? "" : "s"} from this browser.
+                    <button className="inline-button" disabled={lessonsLoading} type="button" onClick={importLocalLessons}>
+                      Import to account
+                    </button>
                   </div>
-                  <strong>{filteredCards.length}/{result.vocabulary_cards.length}</strong>
+                ) : null}
+                <div className="lesson-save-row">
+                  <input
+                    aria-label="Lesson title"
+                    disabled={!result}
+                    placeholder="Lesson title"
+                    type="text"
+                    value={lessonTitle}
+                    onChange={(event) => setLessonTitle(event.target.value)}
+                  />
+                  <button className="ghost-button" disabled={!result} type="button" onClick={saveLesson}>
+                    {activeLessonId ? "Update" : "Save"}
+                  </button>
                 </div>
-                <div className="panel-body">
-                  {result.vocabulary_warning ? (
-                    <div className="warning">{result.vocabulary_warning}</div>
-                  ) : null}
-                  <div className="filters">
-                    <div className="search-box">
-                      <Search size={16} />
-                      <input
-                        aria-label="Search vocabulary"
-                        placeholder="Search words, translations, examples"
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                      />
-                    </div>
-                    <select
-                      aria-label="Filter by type"
-                      value={typeFilter}
-                      onChange={(event) => setTypeFilter(event.target.value)}
-                    >
-                      {cardTypes.map((type) => (
-                        <option key={type} value={type}>
-                          {type === "all" ? "All types" : type}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="vocab-list">
-                    {filteredCards.map((card, index) => (
-                      <article className="vocab-card" key={`${card.turkish}-${index}`}>
-                        <div className="vocab-main">
-                          <div>
-                            <span className="pill">{card.item_type}</span>
-                            <h3>{card.turkish}</h3>
-                            <p>{card.translation}</p>
-                          </div>
-                          <div className="vocab-actions">
-                            <button
-                              aria-label={`Play ${card.turkish}`}
-                              className="icon-button"
-                              type="button"
-                              title={formatPair(card.turkish, card.translation)}
-                              onClick={() =>
-                                speakSegments(wordSegments(card, result.target_language, playbackMode))
+                {lessonError ? <div className="error">{lessonError}</div> : null}
+                {!user ? <p className="muted-copy">Not signed in: lessons are saved only in this browser until you log in.</p> : null}
+                <div className="search-box lesson-search">
+                  <Search size={16} />
+                  <input
+                    aria-label="Search saved lessons"
+                    placeholder="Search saved lessons"
+                    value={lessonSearch}
+                    onChange={(event) => setLessonSearch(event.target.value)}
+                  />
+                </div>
+                {filteredLessons.length ? (
+                  <div className="lesson-list">
+                    {filteredLessons.map((lesson) => (
+                      <article className={`lesson-card ${lesson.id === activeLessonId ? "active" : ""}`} key={lesson.id}>
+                        <button className="lesson-open" type="button" onClick={() => openLesson(lesson)}>
+                          <strong>{lesson.title}</strong>
+                          <span>
+                            {lesson.result.study_level} · {lesson.result.target_language} · {new Date(lesson.created_at).toLocaleDateString()}
+                          </span>
+                        </button>
+                        <div className="lesson-actions">
+                          <button
+                            className="icon-button"
+                            type="button"
+                            aria-label={`Rename ${lesson.title}`}
+                            onClick={() => {
+                              const title = window.prompt("Rename lesson", lesson.title);
+                              if (title !== null) {
+                                renameLesson(lesson, title);
                               }
-                            >
-                              <Play size={16} />
-                            </button>
-                            <button
-                              aria-label={`Play example for ${card.turkish}`}
-                              className="icon-button"
-                              type="button"
-                              title={formatPair(card.example_tr, card.example_translation)}
-                              onClick={() =>
-                                speakSegments(exampleSegments(card, result.target_language, playbackMode))
-                              }
-                            >
-                              <Headphones size={16} />
-                            </button>
-                          </div>
-                        </div>
-                        <div className="example-block">
-                          <strong>{card.example_tr}</strong>
-                          <span>{card.example_translation}</span>
-                        </div>
-                        <div className="card-foot">
-                          <span>{card.cefr_level}</span>
-                          <span>{card.learner_note}</span>
+                            }}
+                          >
+                            <RefreshCw size={16} />
+                          </button>
+                          <button className="icon-button" type="button" aria-label={`Delete ${lesson.title}`} onClick={() => deleteLesson(lesson)}>
+                            <Trash2 size={16} />
+                          </button>
                         </div>
                       </article>
                     ))}
                   </div>
-                </div>
-              </section>
+                ) : (
+                  <p className="muted-copy">
+                    {user ? "Saved lessons from your account will appear here." : "Local saved lessons stay in this browser. Sign in to keep them across devices."}
+                  </p>
+                )}
+              </>
+            ) : null}
 
-              <section className="panel">
-                <div className="panel-header">
-                  <div className="panel-title">
-                    <FileText size={18} />
-                    <h2>Detected Units</h2>
+            {workspaceTab === "audio" ? (
+              <>
+                <div className="tts-grid">
+                  <div className="field">
+                    <label htmlFor="voice-select">Voice</label>
+                    <select id="voice-select" value={selectedVoice} onChange={(event) => setSelectedVoice(event.target.value)}>
+                      <option value="">Auto</option>
+                      {(turkishVoices.length ? turkishVoices : voices).map((voice) => (
+                        <option key={`${voice.name}-${voice.lang}`} value={voice.name}>
+                          {voice.name} · {voice.lang}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="playback-mode">Playback</label>
+                    <select id="playback-mode" value={playbackMode} onChange={(event) => setPlaybackMode(event.target.value as PlaybackMode)}>
+                      <option value="bilingual">Translation + Turkish</option>
+                      <option value="turkish">Turkish only</option>
+                      <option value="translation">Translation only</option>
+                    </select>
                   </div>
                 </div>
-                <div className="panel-body">
-                  <div className="unit-list">
-                    {result.units.slice(0, 12).map((unit, index) => (
-                      <div className="unit" key={`${unit.kind}-${index}`}>
-                        <span>{unit.kind}</span>
-                        <p>{unit.text}</p>
-                      </div>
+                <div className="tts-grid">
+                  <div className="field">
+                    <label htmlFor="playback-engine">Engine</label>
+                    <select id="playback-engine" value={playbackEngine} onChange={(event) => setPlaybackEngine(event.target.value as PlaybackEngine)}>
+                      <option value="browser">Browser speech</option>
+                      <option value="generated">Generated audio</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="speech-rate">Rate</label>
+                    <div className="range-row">
+                      <input id="speech-rate" max="1.6" min="0.7" step="0.1" type="range" value={speechRate} onChange={(event) => changeSpeechRate(Number(event.target.value))} />
+                      <strong>{speechRate.toFixed(1)}x</strong>
+                    </div>
+                  </div>
+                </div>
+                <div className="player-buttons">
+                  <button className="ghost-button play-button" type="button" onClick={speak}>
+                    <Play size={18} />
+                    Play
+                  </button>
+                  <button
+                    className="ghost-button"
+                    disabled={!result?.vocabulary_cards.length}
+                    type="button"
+                    onClick={() =>
+                      startPlaybackQueue(wordPlaybackQueue(result?.vocabulary_cards ?? [], result?.target_language ?? targetLanguage, playbackMode), "Words")
+                    }
+                  >
+                    <Play size={18} />
+                    Words
+                  </button>
+                  <button
+                    className="ghost-button"
+                    disabled={!result?.vocabulary_cards.length}
+                    type="button"
+                    onClick={() =>
+                      startPlaybackQueue(examplePlaybackQueue(result?.vocabulary_cards ?? [], result?.target_language ?? targetLanguage, playbackMode), "Examples")
+                    }
+                  >
+                    <Play size={18} />
+                    Examples
+                  </button>
+                  <button className="ghost-button" disabled={!speaking} type="button" onClick={pauseOrResume}>
+                    {paused ? <RefreshCw size={18} /> : <Pause size={18} />}
+                    {paused ? "Resume" : "Pause"}
+                  </button>
+                  <button aria-label="Previous item" className="icon-button" disabled={!speaking || playbackTotal < 2} type="button" onClick={() => skipPlayback(-1)}>
+                    <SkipBack size={18} />
+                  </button>
+                  <button aria-label="Next item" className="icon-button" disabled={!speaking || playbackTotal < 2} type="button" onClick={() => skipPlayback(1)}>
+                    <SkipForward size={18} />
+                  </button>
+                  <button aria-label="Stop playback" className="icon-button" disabled={!speaking} type="button" onClick={stopSpeech}>
+                    <Square size={18} />
+                  </button>
+                </div>
+                <div className="playback-status" aria-live="polite">
+                  <span>{speaking ? playbackLabel || "Read Aloud" : "Background playback"}</span>
+                  <strong>
+                    {audioLoading
+                      ? "Generating..."
+                      : speaking
+                        ? `${playbackProgress(playbackCurrent, playbackTotal)} · ${activeEngine === "generated" ? "audio" : "speech"}`
+                        : ttsConfig?.configured
+                          ? `${ttsConfig.provider} ready`
+                          : pwaReady
+                            ? "PWA ready"
+                            : "Browser speech"}
+                  </strong>
+                </div>
+                <p className="muted-copy">
+                  Browser speech is the default and does not call the generated-audio API. Select Generated audio only when you want provider audio for stronger mobile background playback; it may use paid API credits.
+                </p>
+                {!ttsConfig?.configured && playbackEngine !== "browser" ? (
+                  <p className="voice-warning">Generated audio is not configured. Add OpenAI TTS settings on the API, or choose Browser speech.</p>
+                ) : null}
+                {ttsConfig?.configured && !user ? (
+                  <p className="voice-warning">Sign in to use generated audio. Browser speech still works without an account.</p>
+                ) : null}
+                {playbackNotice ? <p className="voice-warning">{playbackNotice}</p> : null}
+                {!turkishVoices.length ? (
+                  <p className="voice-warning">No Turkish browser voice is currently available. Playback will use the closest installed voice.</p>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </section>
+      </section>
+
+      <section className="study-output-shell">
+        {!result ? (
+          <section className="panel empty-state">
+            <div>
+              <Upload size={40} />
+              <p>Study output will appear here.</p>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="panel">
+              <div className="panel-header">
+                <div className="panel-title">
+                  <FileText size={18} />
+                  <h2>{activeLesson ? "Saved Lesson" : "Extracted"}</h2>
+                </div>
+              </div>
+              <div className="panel-body">
+                {activeLesson ? (
+                  <div className="revision-banner">
+                    Revising saved lesson: <strong>{activeLesson.title}</strong>
+                  </div>
+                ) : null}
+                <div className="meta-grid">
+                  <div className="meta-item">
+                    <span>Source</span>
+                    <strong>{result.source_type}</strong>
+                  </div>
+                  <div className="meta-item">
+                    <span>Inferred</span>
+                    <strong>{result.inferred_level}</strong>
+                  </div>
+                  <div className="meta-item">
+                    <span>Studying</span>
+                    <strong>{result.study_level}</strong>
+                  </div>
+                  <div className="meta-item">
+                    <span>Target</span>
+                    <strong>{result.target_language}</strong>
+                  </div>
+                </div>
+                <div className="field" style={{ marginTop: 16 }}>
+                  <label>Preview</label>
+                  <div className="preview">{result.preview}</div>
+                </div>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <div className="panel-title">
+                  <FileText size={18} />
+                  <h2>Vocabulary Cards</h2>
+                </div>
+                <strong>{filteredCards.length}/{result.vocabulary_cards.length}</strong>
+              </div>
+              <div className="panel-body">
+                {result.vocabulary_warning ? <div className="warning">{result.vocabulary_warning}</div> : null}
+                <div className="filters">
+                  <div className="search-box">
+                    <Search size={16} />
+                    <input aria-label="Search vocabulary" placeholder="Search words, translations, examples" value={search} onChange={(event) => setSearch(event.target.value)} />
+                  </div>
+                  <select aria-label="Filter by type" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+                    {cardTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type === "all" ? "All types" : type}
+                      </option>
                     ))}
-                  </div>
+                  </select>
                 </div>
-              </section>
+                <div className="vocab-list">
+                  {filteredCards.map((card, index) => (
+                    <article className="vocab-card" key={`${card.turkish}-${index}`}>
+                      <div className="vocab-main">
+                        <div>
+                          <span className="pill">{card.item_type}</span>
+                          <h3>{card.turkish}</h3>
+                          <p>{card.translation}</p>
+                        </div>
+                        <div className="vocab-actions">
+                          <button
+                            aria-label={`Play ${card.turkish}`}
+                            className="icon-button"
+                            type="button"
+                            title={formatPair(card.turkish, card.translation)}
+                            onClick={() => speakSegments(wordSegments(card, result.target_language, playbackMode))}
+                          >
+                            <Play size={16} />
+                          </button>
+                          <button
+                            aria-label={`Play example for ${card.turkish}`}
+                            className="icon-button"
+                            type="button"
+                            title={formatPair(card.example_tr, card.example_translation)}
+                            onClick={() => speakSegments(exampleSegments(card, result.target_language, playbackMode))}
+                          >
+                            <Headphones size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="example-block">
+                        <strong>{card.example_tr}</strong>
+                        <span>{card.example_translation}</span>
+                      </div>
+                      <div className="card-foot">
+                        <span>{card.cefr_level}</span>
+                        <span>{card.learner_note}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </section>
 
-              <section className="panel">
-                <div className="panel-header">
-                  <div className="panel-title">
-                    <FileText size={18} />
-                    <h2>Study Note</h2>
-                  </div>
+            <section className="panel">
+              <div className="panel-header">
+                <div className="panel-title">
+                  <FileText size={18} />
+                  <h2>Detected Units</h2>
                 </div>
-                <div className="panel-body">
-                  <pre className="note">{result.note}</pre>
+              </div>
+              <div className="panel-body">
+                <div className="unit-list">
+                  {result.units.slice(0, 12).map((unit, index) => (
+                    <div className="unit" key={`${unit.kind}-${index}`}>
+                      <span>{unit.kind}</span>
+                      <p>{unit.text}</p>
+                    </div>
+                  ))}
                 </div>
-              </section>
-            </>
-          )}
-        </div>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <div className="panel-title">
+                  <FileText size={18} />
+                  <h2>Study Note</h2>
+                </div>
+              </div>
+              <div className="panel-body">
+                <pre className="note">{result.note}</pre>
+              </div>
+            </section>
+          </>
+        )}
       </section>
     </main>
   );

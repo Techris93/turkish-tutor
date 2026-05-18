@@ -150,6 +150,14 @@ function isAuthRequired(error: unknown): boolean {
   return error instanceof Error && /authentication required|session expired/i.test(error.message);
 }
 
+function studyErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (/load failed|failed to fetch|networkerror/i.test(message)) {
+    return "Could not reach the tutor API. Refresh and try again; if it persists, the backend service may be waking up or blocked.";
+  }
+  return message || "Study request failed.";
+}
+
 function GoogleIcon() {
   return (
     <svg aria-hidden="true" className="oauth-icon" viewBox="0 0 24 24">
@@ -571,16 +579,16 @@ export default function Home() {
         body,
         headers: authHeaders()
       });
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload.detail || "Study request failed.");
+        throw new Error(payload.detail || payload.message || `Study request failed (${response.status}).`);
       }
       setResult(payload);
       setLevel(payload.study_level);
       setActiveLessonId(null);
       setLessonTitle(defaultLessonTitle(payload));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Study request failed.");
+      setError(studyErrorMessage(caught));
     } finally {
       setLoading(false);
     }
@@ -1354,11 +1362,11 @@ export default function Home() {
                   </form>
                 )}
 
-                {oauthProviders.length ? (
+                {!user && oauthProviders.length ? (
                   <div className="oauth-row">
                     {oauthProviders.map((provider) => (
                       <button
-                        className="ghost-button"
+                        className="ghost-button oauth-button"
                         disabled={!provider.authorization_url}
                         key={provider.provider}
                         type="button"
@@ -1372,7 +1380,7 @@ export default function Home() {
                         }
                       >
                         {oauthProviderIcon(provider.provider)}
-                        {oauthProviderLabel(provider.provider)} OAuth
+                        <span className="oauth-label">{oauthProviderLabel(provider.provider)} OAuth</span>
                       </button>
                     ))}
                   </div>

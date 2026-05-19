@@ -366,7 +366,7 @@ input:focus {
 .tab-list {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 2px;
   padding: 4px;
   border-radius: 0;
@@ -517,6 +517,121 @@ input:focus {
 
 .lesson-search {
   margin: 12px 0;
+}
+
+.guide-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.guide-hero {
+  border-left: 4px solid var(--accent-teal);
+  padding-left: 14px;
+}
+
+.guide-hero h2,
+.guide-section-heading h3,
+.guide-card h4 {
+  margin: 0;
+}
+
+.guide-hero h2 {
+  margin-top: 8px;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.65rem;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.guide-hero p,
+.guide-section-heading p,
+.guide-card p,
+.guide-card dd {
+  color: var(--ink-light);
+  line-height: 1.48;
+}
+
+.guide-hero p {
+  margin: 8px 0 0;
+}
+
+.guide-section {
+  display: grid;
+  gap: 10px;
+}
+
+.guide-section-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.guide-section-heading h3 {
+  color: var(--accent-teal);
+  font-size: 0.96rem;
+}
+
+.guide-section-heading p {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.guide-card {
+  min-width: 0;
+  border: 1px solid rgba(30, 30, 36, 0.08);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+  padding: 13px;
+}
+
+.guide-card h4 {
+  font-size: 0.95rem;
+}
+
+.guide-card p {
+  margin: 6px 0 10px;
+  font-size: 0.84rem;
+}
+
+.guide-card dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.guide-card div {
+  display: grid;
+  gap: 3px;
+}
+
+.guide-card dt {
+  color: var(--accent-teal);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.guide-card dd {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.guide-card code {
+  display: block;
+  border-radius: 6px;
+  background: rgba(0, 109, 119, 0.07);
+  color: var(--ink-dark);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  padding: 7px 8px;
+  white-space: normal;
 }
 
 .search-box {
@@ -819,6 +934,7 @@ input[type="range"] {
   .auth-grid,
   .tts-grid,
   .filters,
+  .guide-grid,
   .lesson-save-row,
   .lesson-card,
   .meta-grid {

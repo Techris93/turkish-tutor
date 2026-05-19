@@ -2,6 +2,7 @@
 
 import {
   BookOpen,
+  Compass,
   FileText,
   Headphones,
   KeyRound,
@@ -99,6 +100,76 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const ALLOW_REMEMBER_ME = process.env.NEXT_PUBLIC_ALLOW_REMEMBER_ME !== "false";
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const targetLanguages = ["English", "Turkish", "Spanish", "French", "German", "Italian"];
+const guideSections = [
+  {
+    title: "Understanding Turkish sentence structure",
+    intro: "Read Turkish like a formula: find the verb, unpack the suffixes, then connect the details.",
+    strategies: [
+      {
+        title: "Anchor and Reverse",
+        purpose: "Use the final verb as the sentence anchor instead of translating from the first word.",
+        drill: "Jump to the end, identify the action and tense, then move backward for who, what, where, and when.",
+        example: "Arkadaşım dün kütüphanede çok zor bir kitap okudu.",
+        hint: "okudu = read; then fill in friend, yesterday, library, difficult book."
+      },
+      {
+        title: "Suffix Stack",
+        purpose: "Long Turkish words become easier when you treat suffixes as ordered data.",
+        drill: "Find the root first, then unpack the ending from right to left: person, tense, negation, voice.",
+        example: "Yap-tır-ma-dı-m",
+        hint: "I + past + not + make someone do + do = I did not have it done."
+      },
+      {
+        title: "Russian Doll Clauses",
+        purpose: "Relative clauses often sit before the noun as one large adjective.",
+        drill: "When you see -en/-an or -dik/-dık forms, bundle the words before them and attach them to the next noun.",
+        example: "[Dün aldığım] araba kırmızı.",
+        hint: "The car that I bought yesterday is red."
+      },
+      {
+        title: "Listening Buffer",
+        purpose: "In conversation, hold early details until the final verb unlocks the meaning.",
+        drill: "Listen for time, place, object, and case endings without translating; let the verb make them snap together.",
+        example: "ev-e / ev-de",
+        hint: "Tiny endings change the role: to the house vs. in the house."
+      }
+    ]
+  },
+  {
+    title: "Speaking without translating from English",
+    intro: "Build direct Turkish output so you are not composing a perfect English sentence first.",
+    strategies: [
+      {
+        title: "Islands Technique",
+        purpose: "Create small zones of fluent speech around topics you often discuss.",
+        drill: "Prepare natural Turkish lines for work, hobbies, and recent events; repeat them until they feel automatic.",
+        example: "Bugün yeni bir proje üzerinde çalışıyorum.",
+        hint: "Pre-loaded sentences reduce pressure during real conversation."
+      },
+      {
+        title: "Circumlocution",
+        purpose: "Stay in Turkish when a word disappears by describing around it.",
+        drill: "Pick an object and explain it without naming it, using only Turkish you already know.",
+        example: "Bilgisayarıma elektrik veren kablo.",
+        hint: "This keeps the Turkish circuit running instead of crashing back to English."
+      },
+      {
+        title: "Lexical Chunking",
+        purpose: "Learn usable blocks instead of isolated words.",
+        drill: "Store collocations and verb phrases as one unit so the grammar is already baked in.",
+        example: "hata yapmak",
+        hint: "Learn make a mistake as one Turkish chunk, not two separate words."
+      },
+      {
+        title: "Audio Shadowing",
+        purpose: "Train your mouth and ear to operate before the translation layer starts.",
+        drill: "Play a short Turkish clip and repeat out loud a fraction of a second behind the speaker without pausing.",
+        example: "Dinle, takip et, aynı anda söyle.",
+        hint: "No silence means less time for English word-order habits to interfere."
+      }
+    ]
+  }
+];
 
 function getSessionToken() {
   if (typeof window === "undefined") {
@@ -231,7 +302,7 @@ export default function Home() {
   const [playbackNotice, setPlaybackNotice] = useState("");
   const [pwaReady, setPwaReady] = useState(false);
   const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>("browser");
-  const [workspaceTab, setWorkspaceTab] = useState<"account" | "lessons" | "audio">("account");
+  const [workspaceTab, setWorkspaceTab] = useState<"account" | "lessons" | "guide" | "audio">("account");
   const [ttsConfig, setTtsConfig] = useState<TTSConfigResponse | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const [activeEngine, setActiveEngine] = useState<"generated" | "browser" | "idle">("idle");
@@ -1269,6 +1340,16 @@ export default function Home() {
               Lessons ({lessonsLoading ? "..." : savedLessons.length})
             </button>
             <button
+              className={workspaceTab === "guide" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={workspaceTab === "guide"}
+              onClick={() => setWorkspaceTab("guide")}
+            >
+              <Compass size={15} />
+              Guide
+            </button>
+            <button
               className={workspaceTab === "audio" ? "active" : ""}
               type="button"
               role="tab"
@@ -1467,6 +1548,51 @@ export default function Home() {
                   </p>
                 )}
               </>
+            ) : null}
+
+            {workspaceTab === "guide" ? (
+              <section className="guide-panel" aria-labelledby="guide-title">
+                <div className="guide-hero">
+                  <span className="pill">Turkish flow</span>
+                  <h2 id="guide-title">Turkish Learning Guide</h2>
+                  <p>
+                    Turkish feels less scrambled when you stop chasing English word order. Start from the verb,
+                    read suffixes as data, and practice speaking in ready-made Turkish chunks.
+                  </p>
+                </div>
+                {guideSections.map((section) => (
+                  <div className="guide-section" key={section.title}>
+                    <div className="guide-section-heading">
+                      <h3>{section.title}</h3>
+                      <p>{section.intro}</p>
+                    </div>
+                    <div className="guide-grid">
+                      {section.strategies.map((strategy) => (
+                        <article className="guide-card" key={strategy.title}>
+                          <h4>{strategy.title}</h4>
+                          <p>{strategy.purpose}</p>
+                          <dl>
+                            <div>
+                              <dt>Practice</dt>
+                              <dd>{strategy.drill}</dd>
+                            </div>
+                            <div>
+                              <dt>Example</dt>
+                              <dd>
+                                <code>{strategy.example}</code>
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Notice</dt>
+                              <dd>{strategy.hint}</dd>
+                            </div>
+                          </dl>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </section>
             ) : null}
 
             {workspaceTab === "audio" ? (

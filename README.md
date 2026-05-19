@@ -16,7 +16,8 @@ An adaptive AI language tutor for Turkish, powered by Google Gemini. Uses the **
 - 🖼️ **Image/PDF/text study intake** — `/study` extracts Turkish from typed text, images, PDFs, DOCX, and text files
 - 🌍 **Translation + CEFR examples** — translates extracted words/phrases/sentences and generates A1-C2 practice lines
 - 🧾 **Vocabulary cards from photos** — splits OCR tables into individual words/phrases, preserves compounds, and creates one translated example card per item
-- 🔊 **Bilingual text-to-speech** — reads Turkish words/examples alone, translations alone, or Turkish followed by the translation
+- 🔊 **Bilingual text-to-speech** — reads Turkish words/examples alone, translations alone, or translations followed by Turkish
+- 🧭 **Dashboard learning guide** — quick strategies for Turkish word order, suffix stacks, listening, and speaking without translating from English
 - 💾 **Account saved lessons** — saves generated study sessions to a user account so learners can revisit and revise them later
 - 🔐 **Production auth basics** — email/password auth, SMTP password reset, Google/GitHub OAuth, and rate limiting
 - 🤖 **Autoresearch loop** — AI agents experiment with different teaching strategies to improve scores
@@ -70,7 +71,7 @@ The frontend calls `http://127.0.0.1:8000` by default. To use a different API UR
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, structured vocabulary cards, browser text-to-speech controls, authentication, and account-backed saved lessons.
+The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, structured vocabulary cards, a dashboard learning guide, browser text-to-speech controls, authentication, and account-backed saved lessons.
 
 ### Local Auth And Database Setup
 

@@ -16,7 +16,7 @@ An adaptive AI language tutor for Turkish, powered by Google Gemini. Uses the **
 - 🖼️ **Image/PDF/text study intake** — `/study` extracts Turkish from typed text, images, PDFs, DOCX, and text files
 - 🌍 **Translation + CEFR examples** — translates extracted words/phrases/sentences and generates A1-C2 practice lines
 - 🧾 **Vocabulary cards from photos** — splits OCR tables into individual words/phrases, preserves compounds, and creates one translated example card per item
-- 🔊 **Bilingual text-to-speech** — reads Turkish words/examples alone, translations alone, or translations followed by Turkish
+- 🔊 **Bilingual text-to-speech** — reads Turkish words/examples alone, translations alone, or translations followed by Turkish, with an optional spoken-text display
 - 🧭 **Dashboard learning guide** — quick strategies for Turkish word order, suffix stacks, listening, and speaking without translating from English
 - 💾 **Account saved lessons** — saves generated study sessions to a user account so learners can revisit and revise them later
 - 🔐 **Production auth basics** — email/password auth, SMTP password reset, Google/GitHub OAuth, and rate limiting
@@ -170,6 +170,7 @@ In the frontend, use:
 - Per-card play buttons to hear one word or one example. In bilingual mode, word playback is spoken as pairs such as `come, gel`; example playback is spoken as pairs such as `come here, buraya gel`.
 - `Words` and `Examples` playback buttons to queue all detected vocabulary with the selected playback mode.
 - The rate slider controls playback speed for browser speech and generated audio. Browser speech restarts the current segment when the rate changes because browsers do not let an active `SpeechSynthesisUtterance` change speed mid-utterance.
+- Enable `Show spoken text` in the Read Aloud tab to display the exact word, example, or study-note segment currently being spoken.
 
 Read-aloud can use generated audio or browser text-to-speech:
 

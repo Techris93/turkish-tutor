@@ -454,6 +454,10 @@ input:focus {
   color: var(--ink-light);
 }
 
+.spoken-toggle {
+  margin: 2px 0 14px;
+}
+
 .account-box {
   display: flex;
   align-items: center;
@@ -740,6 +744,67 @@ input[type="range"] {
   font-weight: 500;
 }
 
+.spoken-text-panel {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  border: 1px solid rgba(0, 109, 119, 0.14);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+  padding: 12px;
+}
+
+.spoken-text-panel.is-idle {
+  border-style: dashed;
+}
+
+.spoken-text-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink-light);
+  font-size: 0.76rem;
+}
+
+.spoken-text-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spoken-text-meta strong,
+.spoken-text-lang {
+  color: var(--accent-teal);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.spoken-text-subtitle,
+.spoken-text-empty {
+  margin: 0;
+  color: var(--ink-light);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.spoken-text-current {
+  margin: 0;
+  color: var(--ink-dark);
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.28rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.spoken-text-lang {
+  justify-self: start;
+}
+
 .empty-state {
   min-height: 420px;
   display: grid;
@@ -944,6 +1009,7 @@ input[type="range"] {
   .vocab-main,
   .account-box,
   .playback-status,
+  .spoken-text-meta,
   .card-foot,
   .lesson-actions {
     align-items: stretch;

@@ -40,6 +40,8 @@ import {
   playbackProgress,
   serializeLessons,
   shouldUseGeneratedAudio,
+  SpokenTextDisplay,
+  spokenTextDisplay,
   textQueueItem,
   upsertLesson,
   wordPlaybackQueue,
@@ -300,6 +302,8 @@ export default function Home() {
   const [playbackCurrent, setPlaybackCurrent] = useState(0);
   const [playbackTotal, setPlaybackTotal] = useState(0);
   const [playbackNotice, setPlaybackNotice] = useState("");
+  const [showSpokenText, setShowSpokenText] = useState(false);
+  const [currentSpokenText, setCurrentSpokenText] = useState<SpokenTextDisplay | null>(null);
   const [pwaReady, setPwaReady] = useState(false);
   const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>("browser");
   const [workspaceTab, setWorkspaceTab] = useState<"account" | "lessons" | "guide" | "audio">("account");
@@ -714,6 +718,7 @@ export default function Home() {
     setPlaybackTotal(0);
     setPlaybackLabel("");
     setPlaybackNotice(message);
+    setCurrentSpokenText(null);
     setMediaSession(null, "none");
   }
 
@@ -828,6 +833,9 @@ export default function Home() {
     setPaused(false);
     setPlaybackCurrent(playbackItemIndexRef.current);
     setPlaybackTotal(queue.length);
+    setCurrentSpokenText(
+      spokenTextDisplay(item, segment, playbackItemIndexRef.current, queue.length, playbackSegmentIndexRef.current)
+    );
     setMediaSession(item, "playing");
 
     const useGenerated = shouldUseGeneratedAudio(playbackEngine, Boolean(ttsConfig?.configured), Boolean(user));
@@ -876,6 +884,7 @@ export default function Home() {
     setPlaybackLabel(label);
     setPlaybackTotal(queue.length);
     setPlaybackCurrent(0);
+    setCurrentSpokenText(null);
     setPlaybackNotice(
       useGenerated
         ? "Using generated audio. This is the recommended mode for mobile background and lock-screen listening."
@@ -1634,6 +1643,18 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
+                <label className="check-row spoken-toggle" htmlFor="show-spoken-text">
+                  <input
+                    checked={showSpokenText}
+                    id="show-spoken-text"
+                    type="checkbox"
+                    onChange={(event) => setShowSpokenText(event.target.checked)}
+                  />
+                  <span>
+                    <strong>Show spoken text</strong>
+                    <small>Display the exact line being read aloud.</small>
+                  </span>
+                </label>
                 <div className="player-buttons">
                   <button className="ghost-button play-button" type="button" onClick={speak}>
                     <Play size={18} />
@@ -1689,6 +1710,23 @@ export default function Home() {
                             : "Browser speech"}
                   </strong>
                 </div>
+                {showSpokenText ? (
+                  <div className={`spoken-text-panel ${currentSpokenText ? "" : "is-idle"}`} aria-live="polite">
+                    {currentSpokenText ? (
+                      <>
+                        <div className="spoken-text-meta">
+                          <span>{currentSpokenText.title}</span>
+                          <strong>{currentSpokenText.progress}</strong>
+                        </div>
+                        {currentSpokenText.subtitle ? <p className="spoken-text-subtitle">{currentSpokenText.subtitle}</p> : null}
+                        <p className="spoken-text-current">{currentSpokenText.text}</p>
+                        <span className="spoken-text-lang">{currentSpokenText.lang}</span>
+                      </>
+                    ) : (
+                      <p className="spoken-text-empty">Start read-aloud playback to show the current spoken text here.</p>
+                    )}
+                  </div>
+                ) : null}
                 <p className="muted-copy">
                   Browser speech is the default and does not call the generated-audio API. Select Generated audio only when you want provider audio for stronger mobile background playback; it may use paid API credits.
                 </p>

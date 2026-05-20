@@ -14,6 +14,7 @@ import {
   playbackProgress,
   serializeLessons,
   shouldUseGeneratedAudio,
+  spokenTextDisplay,
   textQueueItem,
   upsertLesson,
   wordPlaybackQueue,
@@ -99,6 +100,18 @@ test("text queue and progress helpers are deterministic", () => {
   assert.equal(playbackProgress(0, 3), "1 of 3");
   assert.equal(playbackProgress(10, 3), "3 of 3");
   assert.equal(playbackProgress(0, 0), "Ready");
+});
+
+test("spoken text display formats current read-aloud segment", () => {
+  const item = examplePlaybackQueue([card], "English", "bilingual")[0];
+  assert.deepEqual(spokenTextDisplay(item, item.segments[0], 2, 5, 0), {
+    title: "Buraya gel.",
+    subtitle: "Come here.",
+    text: "Come here.",
+    lang: "en-US",
+    progress: "3 of 5 · segment 1 of 2"
+  });
+  assert.equal(spokenTextDisplay(null, item.segments[0], 0, 1), null);
 });
 
 test("generated audio cache keys include text, voice, speed, and provider", () => {

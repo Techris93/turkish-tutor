@@ -52,6 +52,14 @@ export type PlaybackQueueItem = {
   segments: SpeechSegment[];
 };
 
+export type SpokenTextDisplay = {
+  title: string;
+  subtitle: string;
+  text: string;
+  lang: string;
+  progress: string;
+};
+
 export const SAVED_LESSONS_KEY = "turkce-hoca.saved-lessons.v1";
 export const MIN_PLAYBACK_RATE = 0.7;
 export const MAX_PLAYBACK_RATE = 1.6;
@@ -160,6 +168,27 @@ export function playbackProgress(currentIndex: number, total: number): string {
   }
   const current = Math.min(Math.max(currentIndex + 1, 1), total);
   return `${current} of ${total}`;
+}
+
+export function spokenTextDisplay(
+  item: PlaybackQueueItem | null,
+  segment: SpeechSegment | null,
+  itemIndex: number,
+  totalItems: number,
+  segmentIndex = 0
+): SpokenTextDisplay | null {
+  if (!item || !segment?.text) {
+    return null;
+  }
+  const segmentTotal = Math.max(item.segments.length, 1);
+  const segmentProgress = segmentTotal > 1 ? ` · segment ${Math.min(segmentIndex + 1, segmentTotal)} of ${segmentTotal}` : "";
+  return {
+    title: item.title || "Read Aloud",
+    subtitle: item.subtitle,
+    text: normalizeSpeechText(segment.text),
+    lang: segment.lang,
+    progress: `${playbackProgress(itemIndex, totalItems)}${segmentProgress}`
+  };
 }
 
 export function normalizePlaybackRate(rate: number): number {

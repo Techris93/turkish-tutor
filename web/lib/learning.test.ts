@@ -14,6 +14,7 @@ import {
   normalizePlaybackRate,
   PLAYBACK_RATE_PRESETS,
   playbackProgress,
+  readAloudSource,
   serializeLessons,
   shouldUseGeneratedAudio,
   spokenTextDisplay,
@@ -102,6 +103,23 @@ test("text queue and progress helpers are deterministic", () => {
   assert.equal(playbackProgress(0, 3), "1 of 3");
   assert.equal(playbackProgress(10, 3), "3 of 3");
   assert.equal(playbackProgress(0, 0), "Ready");
+});
+
+test("readAloudSource explains what the generic read-aloud button will play", () => {
+  assert.deepEqual(readAloudSource(null, " Merhaba, bugün Türkçe öğreniyorum. "), {
+    label: "Text",
+    text: "Merhaba, bugün Türkçe öğreniyorum."
+  });
+
+  assert.deepEqual(readAloudSource({ ...result, note: "Summary\n\nListen Practice\n- Gel buraya." }, ""), {
+    label: "Practice",
+    text: "Gel buraya."
+  });
+
+  assert.deepEqual(readAloudSource({ ...result, note: "## Study Note\nTürkçe eklemeli bir dildir." }, ""), {
+    label: "Note",
+    text: "Study Note Türkçe eklemeli bir dildir."
+  });
 });
 
 test("spoken text display formats current read-aloud segment", () => {

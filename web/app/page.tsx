@@ -43,6 +43,7 @@ import {
   PLAYBACK_RATE_PRESETS,
   PLAYBACK_RATE_STEP,
   playbackProgress,
+  readAloudSource,
   serializeLessons,
   shouldUseGeneratedAudio,
   SpokenTextDisplay,
@@ -609,13 +610,7 @@ export default function Home() {
     [voices]
   );
 
-  const readableText = useMemo(() => {
-    if (!result) {
-      return text;
-    }
-    const listenPractice = result.note.split(/listen practice/i)[1];
-    return (listenPractice || result.note).replace(/[#*_`>-]/g, " ").trim();
-  }, [result, text]);
+  const readableSource = useMemo(() => readAloudSource(result, text), [result, text]);
 
   const cardTypes = useMemo(() => {
     const types = new Set(result?.vocabulary_cards.map((card) => card.item_type) ?? []);
@@ -921,7 +916,7 @@ export default function Home() {
   }
 
   function speak() {
-    speakTexts([readableText]);
+    speakTexts([readableSource.text]);
   }
 
   async function loadRemoteLessons() {
@@ -1698,9 +1693,16 @@ export default function Home() {
                   </span>
                 </label>
                 <div className="player-buttons">
-                  <button className="ghost-button play-button" type="button" onClick={speak}>
+                  <button
+                    aria-label={`Play ${readableSource.label.toLowerCase()} aloud`}
+                    className="ghost-button play-button"
+                    disabled={!readableSource.text}
+                    title={result ? "Read the current study note or listen-practice text" : "Read the text currently in the input box"}
+                    type="button"
+                    onClick={speak}
+                  >
                     <Play size={18} />
-                    Play
+                    {readableSource.label}
                   </button>
                   <button
                     className="ghost-button"

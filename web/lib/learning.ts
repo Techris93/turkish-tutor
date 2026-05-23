@@ -134,6 +134,21 @@ export function textQueueItem(text: string, title = "Study note"): PlaybackQueue
   return queueItem("study-note", title, "Türkçe Hoca", [{ text: normalizeSpeechText(text), lang: "tr-TR" }]);
 }
 
+export function readAloudSource(result: StudyResponse | null | undefined, inputText: string): { label: string; text: string } {
+  if (!result) {
+    return {
+      label: "Text",
+      text: normalizeSpeechText(inputText)
+    };
+  }
+
+  const listenPractice = result.note.split(/listen practice/i)[1];
+  return {
+    label: listenPractice ? "Practice" : "Note",
+    text: normalizeSpeechText((listenPractice || result.note).replace(/[#*_`>-]/g, " "))
+  };
+}
+
 export function wordPlaybackQueue(
   cards: VocabularyCard[],
   targetLanguage: string,

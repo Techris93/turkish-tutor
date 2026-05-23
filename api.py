@@ -232,7 +232,7 @@ class TTSAudioRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4096)
     language: str = Field("tr-TR", min_length=2, max_length=24)
     voice: Optional[str] = Field(None, max_length=80)
-    speed: float = Field(1.0, ge=0.5, le=2.0)
+    speed: float = Field(1.0, ge=0.25, le=2.0)
     provider: Optional[str] = Field(None, max_length=40)
 
 

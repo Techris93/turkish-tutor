@@ -9,8 +9,10 @@ import {
   deserializeLessons,
   examplePlaybackQueue,
   exampleSegments,
+  formatPlaybackRate,
   formatPair,
   normalizePlaybackRate,
+  PLAYBACK_RATE_PRESETS,
   playbackProgress,
   serializeLessons,
   shouldUseGeneratedAudio,
@@ -116,20 +118,28 @@ test("spoken text display formats current read-aloud segment", () => {
 
 test("generated audio cache keys include text, voice, speed, and provider", () => {
   const segment = { text: "gel", lang: "tr-TR" };
-  assert.notEqual(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "nova", 1.2));
+  assert.notEqual(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "nova", 1.25));
   assert.notEqual(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "alloy", 1));
   assert.equal(audioCacheKey(segment, "openai", "nova", 1), audioCacheKey(segment, "openai", "nova", 1.004));
 });
 
-test("playback rate is normalized for speech and generated audio", () => {
-  assert.equal(normalizePlaybackRate(0.2), 0.7);
-  assert.equal(normalizePlaybackRate(1.24), 1.2);
-  assert.equal(normalizePlaybackRate(2.5), 1.6);
+test("playback rate uses YouTube-style quarter-step presets", () => {
+  assert.deepEqual([...PLAYBACK_RATE_PRESETS], [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]);
+  assert.equal(normalizePlaybackRate(0.1), 0.25);
+  assert.equal(normalizePlaybackRate(0.5), 0.5);
+  assert.equal(normalizePlaybackRate(0.63), 0.75);
+  assert.equal(normalizePlaybackRate(1.24), 1.25);
+  assert.equal(normalizePlaybackRate(2.5), 2);
   assert.equal(normalizePlaybackRate(Number.NaN), 1);
+  assert.equal(formatPlaybackRate(0.25), "0.25x");
+  assert.equal(formatPlaybackRate(0.5), "0.5x");
+  assert.equal(formatPlaybackRate(1.25), "1.25x");
+  assert.equal(formatPlaybackRate(1), "1.0x");
+  assert.equal(formatPlaybackRate(2), "2.0x");
 
   const segment = { text: "gel", lang: "tr-TR" };
-  assert.equal(audioCacheKey(segment, "openai", "nova", 1.04), audioCacheKey(segment, "openai", "nova", 1));
-  assert.notEqual(audioCacheKey(segment, "openai", "nova", 1.05), audioCacheKey(segment, "openai", "nova", 1));
+  assert.equal(audioCacheKey(segment, "openai", "nova", 1.12), audioCacheKey(segment, "openai", "nova", 1));
+  assert.notEqual(audioCacheKey(segment, "openai", "nova", 1.13), audioCacheKey(segment, "openai", "nova", 1));
 });
 
 test("generated audio engine selection requires explicit generated mode", () => {

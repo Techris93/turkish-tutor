@@ -61,8 +61,10 @@ export type SpokenTextDisplay = {
 };
 
 export const SAVED_LESSONS_KEY = "turkce-hoca.saved-lessons.v1";
-export const MIN_PLAYBACK_RATE = 0.7;
-export const MAX_PLAYBACK_RATE = 1.6;
+export const MIN_PLAYBACK_RATE = 0.25;
+export const MAX_PLAYBACK_RATE = 2;
+export const PLAYBACK_RATE_STEP = 0.25;
+export const PLAYBACK_RATE_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 
 const targetLanguageCodes: Record<string, string> = {
   english: "en-US",
@@ -196,7 +198,19 @@ export function normalizePlaybackRate(rate: number): number {
     return 1;
   }
   const bounded = Math.min(Math.max(rate, MIN_PLAYBACK_RATE), MAX_PLAYBACK_RATE);
-  return Number(bounded.toFixed(1));
+  const stepped = Math.round(bounded / PLAYBACK_RATE_STEP) * PLAYBACK_RATE_STEP;
+  return Number(stepped.toFixed(2));
+}
+
+export function formatPlaybackRate(rate: number): string {
+  const normalized = normalizePlaybackRate(rate);
+  if (Number.isInteger(normalized)) {
+    return `${normalized.toFixed(1)}x`;
+  }
+  if (Number.isInteger(normalized * 2)) {
+    return `${normalized.toFixed(1)}x`;
+  }
+  return `${normalized.toFixed(2)}x`;
 }
 
 export function audioCacheKey(segment: SpeechSegment, provider: string, voice: string, speed: number): string {

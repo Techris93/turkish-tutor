@@ -35,8 +35,13 @@ import {
   deserializeLessons,
   examplePlaybackQueue,
   exampleSegments,
+  formatPlaybackRate,
   formatPair,
+  MAX_PLAYBACK_RATE,
+  MIN_PLAYBACK_RATE,
   normalizePlaybackRate,
+  PLAYBACK_RATE_PRESETS,
+  PLAYBACK_RATE_STEP,
   playbackProgress,
   serializeLessons,
   shouldUseGeneratedAudio,
@@ -339,6 +344,7 @@ export default function Home() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioCacheRef = useRef<Map<string, string>>(new Map());
   const speechRateRef = useRef(1);
+  const restartBrowserOnResumeRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -710,6 +716,7 @@ export default function Home() {
   function resetPlaybackState(message = "") {
     audioRef.current?.pause();
     audioRef.current = null;
+    restartBrowserOnResumeRef.current = false;
     setSpeaking(false);
     setPaused(false);
     setAudioLoading(false);
@@ -829,6 +836,7 @@ export default function Home() {
     }
 
     const runId = playbackRunRef.current;
+    restartBrowserOnResumeRef.current = false;
     setSpeaking(true);
     setPaused(false);
     setPlaybackCurrent(playbackItemIndexRef.current);
@@ -878,6 +886,7 @@ export default function Home() {
     window.speechSynthesis?.cancel();
     audioRef.current?.pause();
     audioRef.current = null;
+    restartBrowserOnResumeRef.current = false;
     playbackQueueRef.current = queue;
     playbackItemIndexRef.current = 0;
     playbackSegmentIndexRef.current = 0;
@@ -1158,7 +1167,12 @@ export default function Home() {
       if (activeEngine === "generated") {
         void audioRef.current?.play();
       } else if ("speechSynthesis" in window) {
-        window.speechSynthesis.resume();
+        if (restartBrowserOnResumeRef.current) {
+          restartBrowserOnResumeRef.current = false;
+          void playCurrentSegment();
+        } else {
+          window.speechSynthesis.resume();
+        }
       }
       setPaused(false);
       if ("mediaSession" in navigator) {
@@ -1184,6 +1198,7 @@ export default function Home() {
     }
     const nextIndex = Math.min(Math.max(playbackItemIndexRef.current + direction, 0), queue.length - 1);
     playbackRunRef.current += 1;
+    restartBrowserOnResumeRef.current = false;
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -1205,13 +1220,17 @@ export default function Home() {
     if (
       activeEngine === "browser" &&
       speaking &&
-      !paused &&
       playbackQueueRef.current.length &&
       "speechSynthesis" in window
     ) {
       playbackRunRef.current += 1;
       window.speechSynthesis.cancel();
-      void playCurrentSegment();
+      if (paused) {
+        restartBrowserOnResumeRef.current = true;
+        setPlaybackNotice(`Speed set to ${formatPlaybackRate(normalized)}. Resume restarts the current line at the new speed.`);
+      } else {
+        void playCurrentSegment();
+      }
     }
   }
 
@@ -1637,9 +1656,44 @@ export default function Home() {
                   </div>
                   <div className="field">
                     <label htmlFor="speech-rate">Rate</label>
-                    <div className="range-row">
-                      <input id="speech-rate" max="1.6" min="0.7" step="0.1" type="range" value={speechRate} onChange={(event) => changeSpeechRate(Number(event.target.value))} />
-                      <strong>{speechRate.toFixed(1)}x</strong>
+                    <div className="speed-control">
+                      <div className="speed-topline">
+                        <select
+                          aria-label="Playback speed"
+                          id="speech-rate-preset"
+                          value={speechRate}
+                          onChange={(event) => changeSpeechRate(Number(event.target.value))}
+                        >
+                          {PLAYBACK_RATE_PRESETS.map((rate) => (
+                            <option key={rate} value={rate}>
+                              {formatPlaybackRate(rate)}
+                            </option>
+                          ))}
+                        </select>
+                        <strong>{formatPlaybackRate(speechRate)}</strong>
+                      </div>
+                      <input
+                        aria-label="Fine playback speed"
+                        id="speech-rate"
+                        max={MAX_PLAYBACK_RATE}
+                        min={MIN_PLAYBACK_RATE}
+                        step={PLAYBACK_RATE_STEP}
+                        type="range"
+                        value={speechRate}
+                        onChange={(event) => changeSpeechRate(Number(event.target.value))}
+                      />
+                      <div className="speed-presets" aria-label="Playback speed presets">
+                        {PLAYBACK_RATE_PRESETS.map((rate) => (
+                          <button
+                            className={speechRate === rate ? "active" : ""}
+                            key={rate}
+                            type="button"
+                            onClick={() => changeSpeechRate(rate)}
+                          >
+                            {formatPlaybackRate(rate)}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1729,6 +1783,7 @@ export default function Home() {
                 ) : null}
                 <p className="muted-copy">
                   Browser speech is the default and does not call the generated-audio API. Select Generated audio only when you want provider audio for stronger mobile background playback; it may use paid API credits.
+                  Speed uses YouTube-style presets from 0.25x to 2.0x; some browser voices may clamp extreme speech rates.
                 </p>
                 {!ttsConfig?.configured && playbackEngine !== "browser" ? (
                   <p className="voice-warning">Generated audio is not configured. Add OpenAI TTS settings on the API, or choose Browser speech.</p>

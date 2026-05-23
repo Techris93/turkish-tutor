@@ -110,6 +110,18 @@ class TTSApiTests(unittest.TestCase):
         forwarded_request = mocked_synthesize.await_args.args[0]
         self.assertEqual(forwarded_request.speed, 1.4)
 
+    def test_tts_audio_allows_youtube_style_minimum_speed(self):
+        signed_in = self.signup()
+        mocked_synthesize = AsyncMock(return_value=TTSResult(b"audio", "audio/mpeg", "openai", "nova", "gpt-4o-mini-tts"))
+        with patch.object(api, "synthesize_tts", new=mocked_synthesize):
+            response = signed_in.post(
+                "/api/tts/audio",
+                json={"text": "Merhaba", "language": "tr-TR", "provider": "openai", "speed": 0.25},
+            )
+        self.assertEqual(response.status_code, 200)
+        forwarded_request = mocked_synthesize.await_args.args[0]
+        self.assertEqual(forwarded_request.speed, 0.25)
+
     def test_tts_rate_limit_returns_429(self):
         os.environ["RATE_LIMIT_ENABLED"] = "true"
         os.environ["RATE_LIMIT_TTS"] = "1/60s"

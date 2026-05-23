@@ -169,7 +169,7 @@ In the frontend, use:
 - The playback mode menu to choose `Translation + Turkish`, `Turkish only`, or `Translation only`.
 - Per-card play buttons to hear one word or one example. In bilingual mode, word playback is spoken as pairs such as `come, gel`; example playback is spoken as pairs such as `come here, buraya gel`.
 - `Words` and `Examples` playback buttons to queue all detected vocabulary with the selected playback mode.
-- The rate slider controls playback speed for browser speech and generated audio. Browser speech restarts the current segment when the rate changes because browsers do not let an active `SpeechSynthesisUtterance` change speed mid-utterance.
+- The rate control uses YouTube-style speed presets from `0.25x` to `2.0x`. Browser speech restarts the current segment when the rate changes because browsers do not let an active `SpeechSynthesisUtterance` change speed mid-utterance; generated audio updates the audio playback rate directly where the browser allows it.
 - Enable `Show spoken text` in the Read Aloud tab to display the exact word, example, or study-note segment currently being spoken.
 
 Read-aloud can use generated audio or browser text-to-speech:
@@ -177,7 +177,7 @@ Read-aloud can use generated audio or browser text-to-speech:
 - `Browser speech`: the default. It uses the browser `SpeechSynthesis` engine only and never calls the generated-audio API.
 - `Generated audio`: an explicit opt-in. It uses backend-generated audio through an `HTMLAudioElement` and may use paid provider credits.
 
-Browser text-to-speech tries to use a Turkish voice for Turkish segments and a target-language voice for translations. Available voices vary by browser and operating system, so install system voices if pronunciation quality is limited.
+Browser text-to-speech tries to use a Turkish voice for Turkish segments and a target-language voice for translations. Available voices vary by browser and operating system; some voices also clamp very slow or very fast rates, so generated audio can be more consistent when exact speed control matters.
 
 ### Background Playback And PWA
 

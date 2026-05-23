@@ -1682,18 +1682,6 @@ export default function Home() {
                         value={speechRate}
                         onChange={(event) => changeSpeechRate(Number(event.target.value))}
                       />
-                      <div className="speed-presets" aria-label="Playback speed presets">
-                        {PLAYBACK_RATE_PRESETS.map((rate) => (
-                          <button
-                            className={speechRate === rate ? "active" : ""}
-                            key={rate}
-                            type="button"
-                            onClick={() => changeSpeechRate(rate)}
-                          >
-                            {formatPlaybackRate(rate)}
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   </div>
                 </div>

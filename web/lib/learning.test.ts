@@ -17,6 +17,7 @@ import {
   readAloudSource,
   serializeLessons,
   shouldUseGeneratedAudio,
+  splitSpeechText,
   spokenTextDisplay,
   textQueueItem,
   upsertLesson,
@@ -103,6 +104,17 @@ test("text queue and progress helpers are deterministic", () => {
   assert.equal(playbackProgress(0, 3), "1 of 3");
   assert.equal(playbackProgress(10, 3), "3 of 3");
   assert.equal(playbackProgress(0, 0), "Ready");
+});
+
+test("long read-aloud text is split into smaller speech chunks", () => {
+  const longText = "Birinci cümle Türkçe öğrenmek için önemlidir. ".repeat(12);
+  const chunks = splitSpeechText(longText, 120);
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks.every((chunk) => chunk.length <= 120));
+
+  const item = textQueueItem(longText);
+  assert.ok(item.segments.length > 1);
+  assert.ok(item.segments.every((segment) => segment.lang === "tr-TR"));
 });
 
 test("readAloudSource explains what the generic read-aloud button will play", () => {

@@ -81,6 +81,7 @@ export const MIN_PLAYBACK_RATE = 0.25;
 export const MAX_PLAYBACK_RATE = 2;
 export const PLAYBACK_RATE_STEP = 0.25;
 export const PLAYBACK_RATE_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+export const MAX_SPEECH_SEGMENT_CHARS = 220;
 
 const targetLanguageCodes: Record<string, string> = {
   english: "en-US",
@@ -97,6 +98,58 @@ export function languageCode(language: string): string {
 
 function normalizeSpeechText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+export function splitSpeechText(text: string, maxChars = MAX_SPEECH_SEGMENT_CHARS): string[] {
+  const clean = normalizeSpeechText(text);
+  if (!clean) {
+    return [];
+  }
+  if (clean.length <= maxChars) {
+    return [clean];
+  }
+
+  const sentences = clean.match(/[^.!?…]+[.!?…]?/g)?.map((item) => normalizeSpeechText(item)).filter(Boolean) ?? [clean];
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const sentence of sentences) {
+    if (!current) {
+      current = sentence;
+      continue;
+    }
+    if (`${current} ${sentence}`.length <= maxChars) {
+      current = `${current} ${sentence}`;
+    } else {
+      chunks.push(current);
+      current = sentence;
+    }
+  }
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks.flatMap((chunk) => {
+    if (chunk.length <= maxChars) {
+      return [chunk];
+    }
+    const pieces: string[] = [];
+    let current = "";
+    for (const word of chunk.split(/\s+/)) {
+      if (!current) {
+        current = word;
+      } else if (`${current} ${word}`.length <= maxChars) {
+        current = `${current} ${word}`;
+      } else {
+        pieces.push(current);
+        current = word;
+      }
+    }
+    if (current) {
+      pieces.push(current);
+    }
+    return pieces.filter(Boolean);
+  });
 }
 
 export function formatPair(primary: string, translation: string): string {
@@ -147,7 +200,12 @@ function queueItem(id: string, title: string, subtitle: string, segments: Speech
 }
 
 export function textQueueItem(text: string, title = "Study note"): PlaybackQueueItem {
-  return queueItem("study-note", title, "Türkçe Hoca", [{ text: normalizeSpeechText(text), lang: "tr-TR" }]);
+  return queueItem(
+    "study-note",
+    title,
+    "Türkçe Hoca",
+    splitSpeechText(text).map((chunk) => ({ text: chunk, lang: "tr-TR" }))
+  );
 }
 
 export function readAloudSource(result: StudyResponse | null | undefined, inputText: string): { label: string; text: string } {

@@ -346,6 +346,12 @@ export default function Home() {
   const audioCacheRef = useRef<Map<string, string>>(new Map());
   const speechRateRef = useRef(1);
   const restartBrowserOnResumeRef = useRef(false);
+  const browserSpeechWatchdogRef = useRef<number | null>(null);
+  const pausedRef = useRef(false);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   useEffect(() => {
     let cancelled = false;
@@ -708,10 +714,25 @@ export default function Home() {
       : null;
   }
 
+  function clearBrowserSpeechWatchdog() {
+    if (browserSpeechWatchdogRef.current !== null) {
+      window.clearInterval(browserSpeechWatchdogRef.current);
+      browserSpeechWatchdogRef.current = null;
+    }
+  }
+
+  function speechSegmentTimeoutMs(text: string) {
+    const words = Math.max(text.split(/\s+/).filter(Boolean).length, 1);
+    const rate = Math.max(speechRateRef.current, 0.25);
+    return Math.max(14000, Math.min(90000, (words / rate) * 750 + 10000));
+  }
+
   function resetPlaybackState(message = "") {
+    clearBrowserSpeechWatchdog();
     audioRef.current?.pause();
     audioRef.current = null;
     restartBrowserOnResumeRef.current = false;
+    pausedRef.current = false;
     setSpeaking(false);
     setPaused(false);
     setAudioLoading(false);
@@ -725,9 +746,13 @@ export default function Home() {
   }
 
   function speakSegment(segment: SpeechSegment, runId: number) {
+    clearBrowserSpeechWatchdog();
     setAudioLoading(false);
     setActiveEngine("browser");
     const utterance = new SpeechSynthesisUtterance(segment.text);
+    let settled = false;
+    const startedAt = Date.now();
+    const timeoutMs = speechSegmentTimeoutMs(segment.text);
     utterance.lang = segment.lang;
     utterance.rate = speechRateRef.current;
     const voice = selectVoiceForLanguage(segment.lang);
@@ -736,18 +761,40 @@ export default function Home() {
       utterance.lang = voice.lang;
     }
     utterance.onend = () => {
-      if (runId !== playbackRunRef.current) {
+      if (settled || runId !== playbackRunRef.current) {
         return;
       }
+      settled = true;
+      clearBrowserSpeechWatchdog();
       playbackSegmentIndexRef.current += 1;
       void playCurrentSegment();
     };
     utterance.onerror = () => {
-      if (runId !== playbackRunRef.current) {
+      if (settled || runId !== playbackRunRef.current) {
         return;
       }
+      settled = true;
+      clearBrowserSpeechWatchdog();
       resetPlaybackState("Playback stopped. This browser may have blocked background speech.");
     };
+    browserSpeechWatchdogRef.current = window.setInterval(() => {
+      if (settled || runId !== playbackRunRef.current) {
+        clearBrowserSpeechWatchdog();
+        return;
+      }
+      if (pausedRef.current) {
+        return;
+      }
+      window.speechSynthesis.resume();
+      if (Date.now() - startedAt > timeoutMs) {
+        settled = true;
+        clearBrowserSpeechWatchdog();
+        window.speechSynthesis.cancel();
+        playbackSegmentIndexRef.current += 1;
+        setPlaybackNotice("Browser speech stalled, so Türkçe Hoca moved to the next line automatically.");
+        void playCurrentSegment();
+      }
+    }, 8000);
     window.speechSynthesis.speak(utterance);
   }
 
@@ -832,6 +879,7 @@ export default function Home() {
 
     const runId = playbackRunRef.current;
     restartBrowserOnResumeRef.current = false;
+    pausedRef.current = false;
     setSpeaking(true);
     setPaused(false);
     setPlaybackCurrent(playbackItemIndexRef.current);
@@ -878,6 +926,7 @@ export default function Home() {
       return;
     }
     playbackRunRef.current += 1;
+    clearBrowserSpeechWatchdog();
     window.speechSynthesis?.cancel();
     audioRef.current?.pause();
     audioRef.current = null;
@@ -1173,6 +1222,7 @@ export default function Home() {
       if ("mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "playing";
       }
+      pausedRef.current = false;
     } else {
       if (activeEngine === "generated") {
         audioRef.current?.pause();
@@ -1180,6 +1230,7 @@ export default function Home() {
         window.speechSynthesis.pause();
       }
       setPaused(true);
+      pausedRef.current = true;
       if ("mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "paused";
       }
@@ -1194,6 +1245,7 @@ export default function Home() {
     const nextIndex = Math.min(Math.max(playbackItemIndexRef.current + direction, 0), queue.length - 1);
     playbackRunRef.current += 1;
     restartBrowserOnResumeRef.current = false;
+    clearBrowserSpeechWatchdog();
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -1219,6 +1271,7 @@ export default function Home() {
       "speechSynthesis" in window
     ) {
       playbackRunRef.current += 1;
+      clearBrowserSpeechWatchdog();
       window.speechSynthesis.cancel();
       if (paused) {
         restartBrowserOnResumeRef.current = true;
@@ -1230,6 +1283,7 @@ export default function Home() {
   }
 
   function stopSpeech() {
+    clearBrowserSpeechWatchdog();
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }

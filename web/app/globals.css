@@ -887,6 +887,68 @@ input[type="range"] {
   padding-right: 4px;
 }
 
+.textbook-section-list {
+  display: grid;
+  gap: 12px;
+  max-height: 760px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.textbook-section {
+  border: 1px solid rgba(30, 30, 36, 0.08);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.64);
+  display: grid;
+  gap: 13px;
+  padding: 15px;
+}
+
+.textbook-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.textbook-section-head > div {
+  min-width: 0;
+}
+
+.textbook-section-head h3 {
+  margin: 8px 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.textbook-section-head p,
+.textbook-section > p,
+.textbook-section-head > span,
+.textbook-section li {
+  color: var(--ink-light);
+}
+
+.textbook-section-head > span {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.textbook-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.textbook-grid ul,
+.textbook-practice ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.textbook-section li {
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
 .vocab-card,
 .unit {
   border: 1px solid rgba(30, 30, 36, 0.08);
@@ -1087,11 +1149,13 @@ input[type="range"] {
   .guide-grid,
   .lesson-save-row,
   .lesson-card,
+  .textbook-grid,
   .meta-grid {
     grid-template-columns: 1fr;
   }
 
   .vocab-main,
+  .textbook-section-head,
   .account-box,
   .playback-status,
   .spoken-text-meta,

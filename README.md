@@ -16,6 +16,7 @@ An adaptive AI language tutor for Turkish, powered by Google Gemini. Uses the **
 - 🖼️ **Image/PDF/text study intake** — `/study` extracts Turkish from typed text, images, PDFs, DOCX, and text files
 - 🌍 **Translation + CEFR examples** — translates extracted words/phrases/sentences and generates A1-C2 practice lines
 - 🧾 **Vocabulary cards from photos** — splits OCR tables into individual words/phrases, preserves compounds, and creates one translated example card per item
+- 📖 **Textbook guide from PDFs** — detects units/topics, vocabulary, grammar focus, translations, and practice aligned to uploaded course material
 - 🔊 **Bilingual text-to-speech** — reads Turkish words/examples alone, translations alone, or translations followed by Turkish, with an optional spoken-text display
 - 🧭 **Dashboard learning guide** — quick strategies for Turkish word order, suffix stacks, listening, and speaking without translating from English
 - 💾 **Account saved lessons** — saves generated study sessions to a user account so learners can revisit and revise them later
@@ -161,6 +162,20 @@ When an uploaded photo contains a Turkish word list or table, the backend now:
 - Asks Gemini for strict JSON vocabulary cards, then validates and repairs the response so every detected item is still displayed.
 
 Each vocabulary card includes the Turkish item, English translation, category, CEFR level, a level-appropriate Turkish example, the translated example, a short note, and text-to-speech text for both the word and the example.
+
+### PDF/Textbook Learning Workflow
+
+PDF and document uploads now get an extra textbook-aware pass. When the extracted content looks like a course book, workbook, or syllabus, the backend:
+
+- Extracts embedded PDF text with `pypdf`.
+- Falls back to scanned-page OCR with `PyMuPDF`, `Pillow`, `pytesseract`, and Tesseract when a PDF has little or no embedded text.
+- Detects textbook sections such as `ÜNİTE`, `OKUMA`, `DİNLEME`, `KONUŞMA`, `YAZMA`, `DİL BİLGİSİ`, `KELİME`, and `ALIŞTIRMA`.
+- Infers section type, source pages, level hints, vocabulary signals, and grammar focus.
+- Asks Gemini for a structured textbook guide so explanations, translations, and practice examples follow the uploaded unit/topic instead of becoming generic.
+
+The response can include a `Textbook Guide` panel with source-aligned sections, key vocabulary, grammar focus, passage meaning/translation, and short practice lines. This works alongside the normal vocabulary cards, study note, TTS, and saved lessons.
+
+Large scanned textbooks can be slow and expensive to process. `MAX_UPLOAD_BYTES` controls accepted upload size, and `PDF_OCR_MAX_PAGES` controls how many scanned PDF pages are OCRed before analysis. The Render Blueprint defaults to an 80 MB upload limit and OCR for the first 16 pages. Increase this only if your server has enough time and memory.
 
 In the frontend, use:
 
@@ -332,7 +347,7 @@ Supported intake:
 
 - Typed or pasted Turkish words, phrases, and longer text
 - Plain text/Markdown/CSV/JSON/SRT files
-- PDFs via `pypdf`
+- PDFs via `pypdf`; scanned PDFs use optional `PyMuPDF` rendering plus Tesseract OCR
 - DOCX files via `python-docx`
 - Images/photos/screenshots via `pytesseract` + the Tesseract OCR app
 
@@ -342,7 +357,7 @@ Text-to-speech uses macOS `say` automatically on macOS, including installed Turk
 
 ```bash
 source .venv/bin/activate
-python -m py_compile api.py auth_storage.py email_delivery.py oauth_flow.py rate_limit.py tts_provider.py tutor.py config.py dataset.py evaluate.py swarm.py content_intelligence.py speech.py vocabulary_cards.py
+python -m py_compile api.py auth_storage.py email_delivery.py oauth_flow.py rate_limit.py tts_provider.py tutor.py config.py dataset.py evaluate.py swarm.py content_intelligence.py speech.py vocabulary_cards.py textbook_breakdown.py
 python -m unittest discover -s tests
 
 cd web
@@ -366,6 +381,7 @@ turkish-tutor/
 ├── tts_provider.py  — Generated-audio TTS provider abstraction and OpenAI TTS implementation
 ├── config.py       — Teaching strategies, CEFR levels, system prompt
 ├── content_intelligence.py — Text/PDF/DOCX/image extraction and CEFR study prompt helpers
+├── textbook_breakdown.py — Structured textbook/PDF section JSON parsing and fallbacks
 ├── vocabulary_cards.py — Structured vocabulary-card JSON parsing and fallbacks
 ├── speech.py       — Language-aware TTS voice discovery and playback
 ├── dataset.py      — Knowledge base pipeline (vocabulary, grammar, Q&A)

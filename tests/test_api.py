@@ -20,6 +20,7 @@ class ApiTests(unittest.TestCase):
                 init_db()
                 client = TestClient(api.app)
                 self._assert_study_cards(client)
+                self._assert_textbook_sections(client)
             finally:
                 os.environ.pop("DATABASE_URL", None)
 
@@ -68,6 +69,44 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(payload["vocabulary_cards"]), 2)
         self.assertEqual(payload["vocabulary_cards"][0]["turkish"], "arkadaş")
         self.assertEqual(payload["vocabulary_cards"][1]["example_tr"], "Kapıyı aç.")
+
+    def _assert_textbook_sections(self, client: TestClient):
+        textbook_json = """
+        {
+          "sections": [
+            {
+              "title": "ÜNİTE 1 Sağlıklı Yaşam",
+              "section_type": "unit/topic",
+              "source_pages": "p. 8",
+              "level": "B1",
+              "topic": "Healthy living",
+              "summary": "This unit teaches health vocabulary and advice forms.",
+              "key_vocabulary": ["sağlık = health", "randevu = appointment"],
+              "grammar_focus": ["-malı/-meli = necessity"],
+              "translation": "A short passage about healthy routines.",
+              "practice": ["Düzenli spor yapmalıyım. = I should exercise regularly."]
+            }
+          ]
+        }
+        """
+        with (
+            patch.object(api, "extract_vocabulary_items", return_value=[]),
+            patch.object(api, "ask_llm", new=AsyncMock(side_effect=[textbook_json, "Textbook study note."])),
+        ):
+            response = client.post(
+                "/api/study",
+                data={
+                    "text": "ÜNİTE 1 Sağlıklı Yaşam\nOKUMA\nDoktor hastaya düzenli spor yapmasını tavsiye etti. Hasta ilaçlarını kullanmalı.",
+                    "level": "B1",
+                    "target_language": "English",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["note"], "Textbook study note.")
+        self.assertEqual(payload["textbook_sections"][0]["topic"], "Healthy living")
+        self.assertEqual(payload["textbook_sections"][0]["grammar_focus"][0], "-malı/-meli = necessity")
 
 
 if __name__ == "__main__":

@@ -57,7 +57,8 @@ from content_intelligence import (
     SUPPORTED_FILE_EXTENSIONS,
     build_study_prompt,
     extract_content,
-    extract_text_from_file,
+    extract_text_from_file_details,
+    extract_textbook_sections,
     extract_turkish_units,
     extract_vocabulary_items,
     infer_cefr_level,
@@ -87,6 +88,10 @@ from tts_provider import (
     synthesize_tts,
     tts_status,
 )
+from textbook_breakdown import (
+    build_textbook_breakdown_json_prompt,
+    parse_textbook_breakdown,
+)
 from vocabulary_cards import (
     build_translation_lexicon,
     build_vocabulary_json_prompt,
@@ -101,7 +106,7 @@ DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
-DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 DEFAULT_MAX_TEXT_INPUT_CHARS = 30_000
 
 
@@ -123,6 +128,19 @@ class VocabularyCardModel(BaseModel):
     tts_sentence: str
 
 
+class TextbookSectionModel(BaseModel):
+    title: str
+    section_type: str
+    source_pages: str = ""
+    level: str
+    topic: str
+    summary: str
+    key_vocabulary: List[str] = Field(default_factory=list)
+    grammar_focus: List[str] = Field(default_factory=list)
+    translation: str
+    practice: List[str] = Field(default_factory=list)
+
+
 class StudyResponse(BaseModel):
     source_type: str
     source_label: str
@@ -133,6 +151,9 @@ class StudyResponse(BaseModel):
     units: List[StudyUnit]
     vocabulary_cards: List[VocabularyCardModel]
     vocabulary_warning: str = ""
+    textbook_sections: List[TextbookSectionModel] = Field(default_factory=list)
+    textbook_warning: str = ""
+    extraction_warning: str = ""
     note: str
 
 
@@ -521,18 +542,21 @@ async def extract_upload(upload: UploadFile, current_level: str) -> ExtractedCon
                     raise ExtractionError(f"Uploaded file is too large. Limit is {byte_limit // (1024 * 1024)} MB.")
                 handle.write(chunk)
 
-        text, source_type = extract_text_from_file(temp_path)
+        text, source_type, extraction_warning = extract_text_from_file_details(temp_path)
         text = normalize_text(text)
         if not text:
             raise ExtractionError(f"No readable text found in {source_label}.")
         units = extract_turkish_units(text)
         inferred_level = infer_cefr_level(text, fallback=current_level)
+        textbook_sections = extract_textbook_sections(text) if source_type in {"pdf", "document", "text-file"} else []
         return ExtractedContent(
             source_type=source_type,
             source_label=source_label,
             text=text,
             units=units,
             inferred_level=inferred_level,
+            textbook_sections=textbook_sections,
+            extraction_warning=extraction_warning,
         )
     finally:
         if temp_path is not None:
@@ -1046,6 +1070,25 @@ async def study(
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    textbook_sections = []
+    textbook_warning = ""
+    if extracted.textbook_sections:
+        textbook_prompt = build_textbook_breakdown_json_prompt(
+            extracted,
+            target_language,
+            study_level,
+        )
+        try:
+            textbook_response = await ask_llm(textbook_prompt)
+            textbook_sections, textbook_warning = parse_textbook_breakdown(
+                textbook_response,
+                extracted.textbook_sections,
+                target_language,
+                study_level,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     prompt = build_study_prompt(extracted, target_language, study_level, context)
 
     try:
@@ -1086,5 +1129,22 @@ async def study(
             for card in cards
         ],
         vocabulary_warning=vocabulary_warning,
+        textbook_sections=[
+            TextbookSectionModel(
+                title=section.title,
+                section_type=section.section_type,
+                source_pages=section.source_pages,
+                level=section.level,
+                topic=section.topic,
+                summary=section.summary,
+                key_vocabulary=section.key_vocabulary,
+                grammar_focus=section.grammar_focus,
+                translation=section.translation,
+                practice=section.practice,
+            )
+            for section in textbook_sections
+        ],
+        textbook_warning=textbook_warning,
+        extraction_warning=extracted.extraction_warning,
         note=note,
     )

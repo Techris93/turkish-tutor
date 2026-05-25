@@ -1836,8 +1836,69 @@ export default function Home() {
                   <label>Preview</label>
                   <div className="preview">{result.preview}</div>
                 </div>
+                {result.extraction_warning ? <div className="warning">{result.extraction_warning}</div> : null}
               </div>
             </section>
+
+            {result.textbook_sections?.length ? (
+              <section className="panel">
+                <div className="panel-header">
+                  <div className="panel-title">
+                    <BookOpen size={18} />
+                    <h2>Textbook Guide</h2>
+                  </div>
+                  <strong>{result.textbook_sections.length}</strong>
+                </div>
+                <div className="panel-body">
+                  {result.textbook_warning ? <div className="warning">{result.textbook_warning}</div> : null}
+                  <div className="textbook-section-list">
+                    {result.textbook_sections.map((section, index) => (
+                      <article className="textbook-section" key={`${section.title}-${index}`}>
+                        <div className="textbook-section-head">
+                          <div>
+                            <span className="pill">{section.section_type}</span>
+                            <h3>{section.title}</h3>
+                            <p>{section.topic}</p>
+                          </div>
+                          <span>{section.source_pages || section.level}</span>
+                        </div>
+                        <p>{section.summary}</p>
+                        <div className="textbook-grid">
+                          <div>
+                            <strong>Key vocabulary</strong>
+                            <ul>
+                              {section.key_vocabulary.slice(0, 8).map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div>
+                            <strong>Grammar focus</strong>
+                            <ul>
+                              {section.grammar_focus.slice(0, 6).map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                        <div className="example-block">
+                          <strong>Translation / meaning</strong>
+                          <span>{section.translation}</span>
+                        </div>
+                        <div className="textbook-practice">
+                          <strong>Practice aligned to this section</strong>
+                          <ul>
+                            {section.practice.slice(0, 4).map((item) => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            ) : null}
 
             <section className="panel">
               <div className="panel-header">

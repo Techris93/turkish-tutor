@@ -19,6 +19,19 @@ export type VocabularyCard = {
   tts_sentence: string;
 };
 
+export type TextbookSection = {
+  title: string;
+  section_type: string;
+  source_pages: string;
+  level: string;
+  topic: string;
+  summary: string;
+  key_vocabulary: string[];
+  grammar_focus: string[];
+  translation: string;
+  practice: string[];
+};
+
 export type StudyResponse = {
   source_type: string;
   source_label: string;
@@ -29,6 +42,9 @@ export type StudyResponse = {
   units: StudyUnit[];
   vocabulary_cards: VocabularyCard[];
   vocabulary_warning: string;
+  textbook_sections?: TextbookSection[];
+  textbook_warning?: string;
+  extraction_warning?: string;
   note: string;
 };
 

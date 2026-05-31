@@ -53,7 +53,14 @@ export type SavedLesson = {
   title: string;
   created_at: string;
   updated_at: string;
-  result: StudyResponse;
+  result?: StudyResponse;
+};
+
+export type SavedLessonListResponse = {
+  lessons: SavedLesson[];
+  limit: number;
+  offset: number;
+  total: number;
 };
 
 export type SpeechSegment = {
@@ -357,6 +364,7 @@ export function deserializeLessons(raw: string | null): SavedLesson[] {
         typeof lesson.id === "string" &&
         typeof lesson.title === "string" &&
         typeof lesson.created_at === "string" &&
+        typeof lesson.updated_at === "string" &&
         lesson.result &&
         Array.isArray(lesson.result.vocabulary_cards)
       );

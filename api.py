@@ -19,11 +19,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, urlparse
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -108,6 +108,8 @@ DEFAULT_ALLOWED_ORIGINS = [
 ]
 DEFAULT_MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 DEFAULT_MAX_TEXT_INPUT_CHARS = 30_000
+DEFAULT_LESSON_PAGE_LIMIT = 50
+MAX_LESSON_PAGE_LIMIT = 100
 
 
 class StudyUnit(BaseModel):
@@ -235,9 +237,26 @@ class SavedLessonResponse(BaseModel):
     result: StudyResponse
 
 
+class SavedLessonSummary(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class SavedLessonListResponse(BaseModel):
+    lessons: List[SavedLessonSummary]
+    limit: int
+    offset: int
+    total: int
+
+
 class OAuthRedeemResponse(BaseModel):
     user: UserResponse
-    lessons: List[SavedLessonResponse]
+    lessons: List[SavedLessonSummary]
+    lessons_limit: int
+    lessons_offset: int
+    lessons_total: int
     session_token: str
 
 
@@ -426,6 +445,56 @@ def lesson_response(lesson: DBSavedLesson) -> SavedLessonResponse:
         created_at=isoformat(lesson.created_at),
         updated_at=isoformat(lesson.updated_at),
         result=StudyResponse(**lesson.result),
+    )
+
+
+def lesson_summary_response(
+    lesson_id: str,
+    title: str,
+    created_at: Any,
+    updated_at: Any,
+) -> SavedLessonSummary:
+    return SavedLessonSummary(
+        id=lesson_id,
+        title=title,
+        created_at=isoformat(created_at),
+        updated_at=isoformat(updated_at),
+    )
+
+
+def lesson_summary_columns():
+    return (
+        DBSavedLesson.id,
+        DBSavedLesson.title,
+        DBSavedLesson.created_at,
+        DBSavedLesson.updated_at,
+    )
+
+
+def count_user_lessons(db: Session, user_id: str) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(DBSavedLesson)
+            .where(DBSavedLesson.user_id == user_id)
+        )
+        or 0
+    )
+
+
+def list_user_lesson_summaries(db: Session, user_id: str, limit: int, offset: int) -> SavedLessonListResponse:
+    rows = db.execute(
+        select(*lesson_summary_columns())
+        .where(DBSavedLesson.user_id == user_id)
+        .order_by(DBSavedLesson.updated_at.desc(), DBSavedLesson.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return SavedLessonListResponse(
+        lessons=[lesson_summary_response(*row) for row in rows],
+        limit=limit,
+        offset=offset,
+        total=count_user_lessons(db, user_id),
     )
 
 
@@ -931,29 +1000,25 @@ async def oauth_redeem(
     db.commit()
     token = create_session(db, user)
     set_session_cookie(response, token)
-    lessons = db.scalars(
-        select(DBSavedLesson)
-        .where(DBSavedLesson.user_id == user.id)
-        .order_by(DBSavedLesson.updated_at.desc())
-    ).all()
+    lesson_page = list_user_lesson_summaries(db, user.id, DEFAULT_LESSON_PAGE_LIMIT, 0)
     return OAuthRedeemResponse(
         user=user_response(user),
-        lessons=[lesson_response(lesson) for lesson in lessons],
+        lessons=lesson_page.lessons,
+        lessons_limit=lesson_page.limit,
+        lessons_offset=lesson_page.offset,
+        lessons_total=lesson_page.total,
         session_token=token,
     )
 
 
-@app.get("/api/lessons", response_model=List[SavedLessonResponse])
+@app.get("/api/lessons", response_model=SavedLessonListResponse)
 async def list_lessons(
+    limit: int = Query(DEFAULT_LESSON_PAGE_LIMIT, ge=1, le=MAX_LESSON_PAGE_LIMIT),
+    offset: int = Query(0, ge=0),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
-) -> List[SavedLessonResponse]:
-    lessons = db.scalars(
-        select(DBSavedLesson)
-        .where(DBSavedLesson.user_id == user.id)
-        .order_by(DBSavedLesson.updated_at.desc())
-    ).all()
-    return [lesson_response(lesson) for lesson in lessons]
+) -> SavedLessonListResponse:
+    return list_user_lesson_summaries(db, user.id, limit, offset)
 
 
 @app.post("/api/lessons", response_model=SavedLessonResponse, status_code=status.HTTP_201_CREATED)
@@ -978,8 +1043,13 @@ async def get_lesson(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> SavedLessonResponse:
-    lesson = db.get(DBSavedLesson, lesson_id)
-    if lesson is None or lesson.user_id != user.id:
+    lesson = db.scalar(
+        select(DBSavedLesson).where(
+            DBSavedLesson.id == lesson_id,
+            DBSavedLesson.user_id == user.id,
+        )
+    )
+    if lesson is None:
         raise HTTPException(status_code=404, detail="Saved lesson not found.")
     return lesson_response(lesson)
 
@@ -993,8 +1063,13 @@ async def update_lesson(
     db: Session = Depends(get_db),
 ) -> SavedLessonResponse:
     rate_limit(request, "lesson_write", RateLimitRule(120, 3600), user.id)
-    lesson = db.get(DBSavedLesson, lesson_id)
-    if lesson is None or lesson.user_id != user.id:
+    lesson = db.scalar(
+        select(DBSavedLesson).where(
+            DBSavedLesson.id == lesson_id,
+            DBSavedLesson.user_id == user.id,
+        )
+    )
+    if lesson is None:
         raise HTTPException(status_code=404, detail="Saved lesson not found.")
 
     if payload.title is not None:
@@ -1015,8 +1090,13 @@ async def delete_lesson(
     db: Session = Depends(get_db),
 ) -> Dict[str, bool]:
     rate_limit(request, "lesson_write", RateLimitRule(120, 3600), user.id)
-    lesson = db.get(DBSavedLesson, lesson_id)
-    if lesson is None or lesson.user_id != user.id:
+    lesson = db.scalar(
+        select(DBSavedLesson).where(
+            DBSavedLesson.id == lesson_id,
+            DBSavedLesson.user_id == user.id,
+        )
+    )
+    if lesson is None:
         raise HTTPException(status_code=404, detail="Saved lesson not found.")
     db.delete(lesson)
     db.commit()

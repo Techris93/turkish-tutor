@@ -28,6 +28,7 @@ import {
   PlaybackQueueItem,
   SAVED_LESSONS_KEY,
   SavedLesson,
+  SavedLessonListResponse,
   SpeechSegment,
   StudyResponse,
   audioCacheKey,
@@ -101,11 +102,15 @@ type OAuthProvider = {
 type OAuthRedeemResponse = {
   user: AuthUser;
   lessons: SavedLesson[];
+  lessons_limit: number;
+  lessons_offset: number;
+  lessons_total: number;
   session_token: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const ALLOW_REMEMBER_ME = process.env.NEXT_PUBLIC_ALLOW_REMEMBER_ME !== "false";
+const LESSON_PAGE_LIMIT = 50;
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const targetLanguages = ["English", "Turkish", "Spanish", "French", "German", "Italian"];
 const guideSections = [
@@ -225,6 +230,14 @@ async function apiJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
+function lessonsPath(offset = 0, limit = LESSON_PAGE_LIMIT) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset)
+  });
+  return `/api/lessons?${params.toString()}`;
+}
+
 function isAuthRequired(error: unknown): boolean {
   return error instanceof Error && /authentication required|session expired/i.test(error.message);
 }
@@ -332,6 +345,7 @@ export default function Home() {
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [savedLessons, setSavedLessons] = useState<SavedLesson[]>([]);
   const [localLessons, setLocalLessons] = useState<SavedLesson[]>([]);
+  const [lessonPage, setLessonPage] = useState({ limit: LESSON_PAGE_LIMIT, offset: 0, total: 0 });
   const [lessonsLoaded, setLessonsLoaded] = useState(false);
   const [lessonsLoading, setLessonsLoading] = useState(false);
   const [lessonError, setLessonError] = useState("");
@@ -398,6 +412,7 @@ export default function Home() {
     const local = deserializeLessons(window.localStorage.getItem(SAVED_LESSONS_KEY));
     setLocalLessons(local);
     setSavedLessons(local);
+    setLessonPage({ limit: LESSON_PAGE_LIMIT, offset: 0, total: local.length });
     setLessonsLoaded(true);
     const params = new URLSearchParams(window.location.search);
     const token = params.get("reset_token");
@@ -417,14 +432,26 @@ export default function Home() {
                 method: "POST",
                 body: JSON.stringify({ handoff })
               })
-            : {
-                user: (await apiJson<AuthResponse>("/api/auth/me")).user,
-                lessons: await apiJson<SavedLesson[]>("/api/lessons"),
-                session_token: null
-              };
+            : await (async () => {
+                const auth = await apiJson<AuthResponse>("/api/auth/me");
+                const lessonPage = await apiJson<SavedLessonListResponse>(lessonsPath());
+                return {
+                  user: auth.user,
+                  lessons: lessonPage.lessons,
+                  lessons_limit: lessonPage.limit,
+                  lessons_offset: lessonPage.offset,
+                  lessons_total: lessonPage.total,
+                  session_token: null
+                };
+              })();
           storeSessionToken(payload.session_token, rememberOAuth);
           setUser(payload.user);
           setSavedLessons(payload.lessons);
+          setLessonPage({
+            limit: payload.lessons_limit,
+            offset: payload.lessons_offset,
+            total: payload.lessons_total
+          });
           setActiveLessonId(null);
           setAuthError("");
           setAuthMessage(rememberOAuth ? "Signed in with OAuth. This device will remember you." : "Signed in with OAuth.");
@@ -478,8 +505,9 @@ export default function Home() {
         const payload = await apiJson<AuthResponse>("/api/auth/me");
         if (!cancelled) {
           setUser(payload.user);
-          const lessons = await apiJson<SavedLesson[]>("/api/lessons");
-          setSavedLessons(lessons);
+          const lessonPage = await apiJson<SavedLessonListResponse>(lessonsPath());
+          setSavedLessons(lessonPage.lessons);
+          setLessonPage({ limit: lessonPage.limit, offset: lessonPage.offset, total: lessonPage.total });
           setActiveLessonId(null);
         }
       } catch {
@@ -968,22 +996,28 @@ export default function Home() {
     speakTexts([readableSource.text]);
   }
 
-  async function loadRemoteLessons() {
+  function applyLessonPage(payload: SavedLessonListResponse, append = false) {
+    setSavedLessons((current) => (append ? [...current, ...payload.lessons.filter((lesson) => !current.some((item) => item.id === lesson.id))] : payload.lessons));
+    setLessonPage({ limit: payload.limit, offset: payload.offset, total: payload.total });
+  }
+
+  async function loadRemoteLessons(offset = 0, append = false) {
     setLessonsLoading(true);
     setLessonError("");
     try {
-      const lessons = await apiJson<SavedLesson[]>("/api/lessons");
-      setSavedLessons(lessons);
+      const lessonPage = await apiJson<SavedLessonListResponse>(lessonsPath(offset));
+      applyLessonPage(lessonPage, append);
     } catch (caught) {
       if (isAuthRequired(caught)) {
         try {
           await apiJson<AuthResponse>("/api/auth/me");
-          const lessons = await apiJson<SavedLesson[]>("/api/lessons");
-          setSavedLessons(lessons);
+          const lessonPage = await apiJson<SavedLessonListResponse>(lessonsPath(offset));
+          applyLessonPage(lessonPage, append);
           return;
         } catch {
           setUser(null);
           setSavedLessons(localLessons);
+          setLessonPage({ limit: LESSON_PAGE_LIMIT, offset: 0, total: localLessons.length });
           setAuthError("Your sign-in session was not accepted. Please log in again.");
           return;
         }
@@ -992,6 +1026,10 @@ export default function Home() {
     } finally {
       setLessonsLoading(false);
     }
+  }
+
+  function loadMoreLessons() {
+    void loadRemoteLessons(savedLessons.length, true);
   }
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
@@ -1063,6 +1101,7 @@ export default function Home() {
       storeSessionToken(null);
       setUser(null);
       setSavedLessons(localLessons);
+      setLessonPage({ limit: LESSON_PAGE_LIMIT, offset: 0, total: localLessons.length });
       setActiveLessonId(null);
       setAuthMessage("Logged out. Local draft lessons are still available in this browser.");
     } catch (caught) {
@@ -1081,6 +1120,9 @@ export default function Home() {
     try {
       const imported: SavedLesson[] = [];
       for (const lesson of localLessons) {
+        if (!lesson.result) {
+          continue;
+        }
         const saved = await apiJson<SavedLesson>("/api/lessons", {
           method: "POST",
           body: JSON.stringify({ title: lesson.title, result: lesson.result })
@@ -1125,6 +1167,9 @@ export default function Home() {
               body: JSON.stringify({ title, result })
             });
         setSavedLessons((current) => upsertLesson(current, saved));
+        if (!existing) {
+          setLessonPage((current) => ({ ...current, total: current.total + 1 }));
+        }
         setActiveLessonId(saved.id);
         setLessonTitle(saved.title);
         return;
@@ -1141,6 +1186,7 @@ export default function Home() {
       };
       setLocalLessons((current) => upsertLesson(current, lesson));
       setSavedLessons((current) => upsertLesson(current, lesson));
+      setLessonPage((current) => ({ ...current, total: upsertLesson(savedLessons, lesson).length }));
       setActiveLessonId(lesson.id);
       setLessonTitle(lesson.title);
     } catch (caught) {
@@ -1148,15 +1194,33 @@ export default function Home() {
     }
   }
 
-  function openLesson(lesson: SavedLesson) {
+  async function openLesson(lesson: SavedLesson) {
     stopSpeech();
-    setResult(lesson.result);
-    setLevel(lesson.result.study_level);
-    setTargetLanguage(lesson.result.target_language);
+    setLessonError("");
+    let fullLesson = lesson;
+    if (!fullLesson.result && user) {
+      setLessonsLoading(true);
+      try {
+        fullLesson = await apiJson<SavedLesson>(`/api/lessons/${lesson.id}`);
+        setSavedLessons((current) => upsertLesson(current, fullLesson));
+      } catch (caught) {
+        setLessonError(caught instanceof Error ? caught.message : "Could not open saved lesson.");
+        return;
+      } finally {
+        setLessonsLoading(false);
+      }
+    }
+    if (!fullLesson.result) {
+      setLessonError("This saved lesson summary is missing its full study result. Refresh and try again.");
+      return;
+    }
+    setResult(fullLesson.result);
+    setLevel(fullLesson.result.study_level);
+    setTargetLanguage(fullLesson.result.target_language);
     setSearch("");
     setTypeFilter("all");
-    setActiveLessonId(lesson.id);
-    setLessonTitle(lesson.title);
+    setActiveLessonId(fullLesson.id);
+    setLessonTitle(fullLesson.title);
     setError("");
   }
 
@@ -1198,6 +1262,7 @@ export default function Home() {
         setLocalLessons((current) => current.filter((item) => item.id !== lesson.id));
       }
       setSavedLessons((current) => current.filter((item) => item.id !== lesson.id));
+      setLessonPage((current) => ({ ...current, total: Math.max(0, current.total - 1) }));
       if (activeLessonId === lesson.id) {
         setActiveLessonId(null);
       }
@@ -1296,6 +1361,13 @@ export default function Home() {
     resetPlaybackState("");
   }
 
+  function lessonMeta(lesson: SavedLesson) {
+    if (!lesson.result) {
+      return `Saved · ${new Date(lesson.created_at).toLocaleDateString()}`;
+    }
+    return `${lesson.result.study_level} · ${lesson.result.target_language} · ${new Date(lesson.created_at).toLocaleDateString()}`;
+  }
+
   const filteredLessons = useMemo(() => {
     const query = lessonSearch.trim().toLowerCase();
     if (!query) {
@@ -1304,10 +1376,10 @@ export default function Home() {
     return savedLessons.filter((lesson) =>
       [
         lesson.title,
-        lesson.result.source_label,
-        lesson.result.preview,
-        lesson.result.target_language,
-        lesson.result.study_level
+        lesson.result?.source_label,
+        lesson.result?.preview,
+        lesson.result?.target_language,
+        lesson.result?.study_level
       ]
         .join(" ")
         .toLowerCase()
@@ -1592,11 +1664,9 @@ export default function Home() {
                   <div className="lesson-list">
                     {filteredLessons.map((lesson) => (
                       <article className={`lesson-card ${lesson.id === activeLessonId ? "active" : ""}`} key={lesson.id}>
-                        <button className="lesson-open" type="button" onClick={() => openLesson(lesson)}>
+                        <button className="lesson-open" type="button" onClick={() => void openLesson(lesson)}>
                           <strong>{lesson.title}</strong>
-                          <span>
-                            {lesson.result.study_level} · {lesson.result.target_language} · {new Date(lesson.created_at).toLocaleDateString()}
-                          </span>
+                          <span>{lessonMeta(lesson)}</span>
                         </button>
                         <div className="lesson-actions">
                           <button
@@ -1624,6 +1694,11 @@ export default function Home() {
                     {user ? "Saved lessons from your account will appear here." : "Local saved lessons stay in this browser. Sign in to keep them across devices."}
                   </p>
                 )}
+                {user && savedLessons.length < lessonPage.total ? (
+                  <button className="ghost-button" disabled={lessonsLoading} type="button" onClick={loadMoreLessons}>
+                    {lessonsLoading ? "Loading..." : `Load more (${savedLessons.length}/${lessonPage.total})`}
+                  </button>
+                ) : null}
               </>
             ) : null}
 

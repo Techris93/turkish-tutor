@@ -11,9 +11,11 @@ from fastapi.testclient import TestClient
 import api
 from auth_storage import (
     PasswordResetToken,
+    SavedLesson as DBSavedLesson,
     configure_database,
     create_oauth_state,
     drop_db,
+    engine,
     hash_token,
     init_db,
     session_factory,
@@ -84,6 +86,10 @@ class AuthLessonTests(unittest.TestCase):
             "FRONTEND_ORIGIN",
             "RATE_LIMIT_BACKEND",
             "REDIS_URL",
+            "DB_POOL_SIZE",
+            "DB_MAX_OVERFLOW",
+            "DB_POOL_TIMEOUT",
+            "DB_POOL_RECYCLE_SECONDS",
         ]:
             os.environ.pop(key, None)
         limiter.clear()
@@ -154,7 +160,7 @@ class AuthLessonTests(unittest.TestCase):
         self.assertEqual(created.status_code, 201)
         listed = header_client.get("/api/lessons", headers=headers)
         self.assertEqual(listed.status_code, 200)
-        self.assertEqual(len(listed.json()), 1)
+        self.assertEqual(len(listed.json()["lessons"]), 1)
 
         logout = header_client.post("/api/auth/logout", headers=headers)
         self.assertEqual(logout.status_code, 200)
@@ -306,7 +312,7 @@ class AuthLessonTests(unittest.TestCase):
             json={"title": "OAuth saved lesson", "result": study_result()},
         )
         self.assertEqual(saved.status_code, 201)
-        self.assertEqual(len(header_client.get("/api/lessons", headers=headers).json()), 1)
+        self.assertEqual(len(header_client.get("/api/lessons", headers=headers).json()["lessons"]), 1)
 
         reused_handoff = TestClient(api.app).post("/api/auth/oauth/redeem", json={"handoff": handoff})
         self.assertEqual(reused_handoff.status_code, 400)
@@ -500,7 +506,8 @@ class AuthLessonTests(unittest.TestCase):
 
         listed = owner.get("/api/lessons")
         self.assertEqual(listed.status_code, 200)
-        self.assertEqual(len(listed.json()), 1)
+        self.assertEqual(len(listed.json()["lessons"]), 1)
+        self.assertNotIn("result", listed.json()["lessons"][0])
 
         updated = owner.patch(f"/api/lessons/{lesson['id']}", json={"title": "A1 verbs"})
         self.assertEqual(updated.status_code, 200)
@@ -513,7 +520,70 @@ class AuthLessonTests(unittest.TestCase):
 
         deleted = owner.delete(f"/api/lessons/{lesson['id']}")
         self.assertEqual(deleted.status_code, 200)
-        self.assertEqual(owner.get("/api/lessons").json(), [])
+        self.assertEqual(owner.get("/api/lessons").json()["lessons"], [])
+
+    def test_lesson_listing_is_paginated_and_detail_returns_full_payload(self):
+        owner = self.signup("pagination@example.com")
+        created_ids = []
+        for index in range(7):
+            create = owner.post(
+                "/api/lessons",
+                json={"title": f"Lesson {index}", "result": study_result()},
+            )
+            self.assertEqual(create.status_code, 201)
+            created_ids.append(create.json()["id"])
+
+        listed = owner.get("/api/lessons?limit=3&offset=2")
+        self.assertEqual(listed.status_code, 200)
+        page = listed.json()
+        self.assertEqual(page["limit"], 3)
+        self.assertEqual(page["offset"], 2)
+        self.assertEqual(page["total"], 7)
+        self.assertEqual(len(page["lessons"]), 3)
+        self.assertNotIn("result", page["lessons"][0])
+
+        detail = owner.get(f"/api/lessons/{created_ids[0]}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("result", detail.json())
+        self.assertEqual(detail.json()["result"]["note"], "Short study note.")
+
+        too_large = owner.get("/api/lessons?limit=500")
+        self.assertEqual(too_large.status_code, 422)
+
+    def test_paginated_lessons_are_scoped_to_current_user(self):
+        owner = self.signup("page-owner@example.com")
+        other = self.signup("page-other@example.com")
+        owner.post("/api/lessons", json={"title": "Owner lesson", "result": study_result()})
+        other.post("/api/lessons", json={"title": "Other lesson", "result": study_result()})
+
+        owner_page = owner.get("/api/lessons?limit=10").json()
+        other_page = other.get("/api/lessons?limit=10").json()
+        self.assertEqual(owner_page["total"], 1)
+        self.assertEqual(other_page["total"], 1)
+        self.assertEqual(owner_page["lessons"][0]["title"], "Owner lesson")
+        self.assertEqual(other_page["lessons"][0]["title"], "Other lesson")
+
+    def test_saved_lesson_scaling_indexes_are_declared(self):
+        index_names = {index.name for index in DBSavedLesson.__table__.indexes}
+        self.assertIn("ix_saved_lessons_user_updated", index_names)
+        self.assertIn("ix_saved_lessons_user_created", index_names)
+
+    def test_postgres_engine_uses_configurable_pool_settings(self):
+        os.environ["DATABASE_URL"] = "postgresql://user:pass@localhost:5432/turkish_tutor"
+        os.environ["DB_POOL_SIZE"] = "3"
+        os.environ["DB_MAX_OVERFLOW"] = "4"
+        os.environ["DB_POOL_TIMEOUT"] = "7"
+        os.environ["DB_POOL_RECYCLE_SECONDS"] = "600"
+        configure_database()
+        pool = engine().pool
+        self.assertEqual(pool.size(), 3)
+        self.assertEqual(pool._max_overflow, 4)
+        self.assertEqual(pool._timeout, 7)
+        self.assertEqual(pool._recycle, 600)
+        os.environ["DATABASE_URL"] = self.database_url
+        configure_database(self.database_url)
+        drop_db()
+        init_db()
 
 
 if __name__ == "__main__":

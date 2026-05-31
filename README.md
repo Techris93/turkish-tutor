@@ -84,7 +84,18 @@ AUTH_COOKIE_SECURE=false
 AUTH_COOKIE_SAMESITE=lax
 ```
 
-The API creates the required tables at startup. User passwords are hashed with Argon2. Browser sessions use HTTP-only cookies, so the frontend must call the API with credentials enabled. For browsers that do not reliably keep the API cookie after a cross-subdomain OAuth redirect, the app also keeps the current session token in `sessionStorage` for that tab and sends it as `X-Session-Token`; logout invalidates the same server-side session. If the learner checks `Remember me`, the same fallback token is also stored in `localStorage` on that device so the app can restore the account after the browser is closed.
+The API creates the required tables and indexes at startup. User passwords are hashed with Argon2. Browser sessions use HTTP-only cookies, so the frontend must call the API with credentials enabled. For browsers that do not reliably keep the API cookie after a cross-subdomain OAuth redirect, the app also keeps the current session token in `sessionStorage` for that tab and sends it as `X-Session-Token`; logout invalidates the same server-side session. If the learner checks `Remember me`, the same fallback token is also stored in `localStorage` on that device so the app can restore the account after the browser is closed.
+
+For Postgres deployments, SQLAlchemy uses `pool_pre_ping=true` and these optional connection pool settings:
+
+```bash
+DB_POOL_SIZE=5
+DB_MAX_OVERFLOW=5
+DB_POOL_TIMEOUT=30
+DB_POOL_RECYCLE_SECONDS=1800
+```
+
+The Render Blueprint uses conservative defaults suitable for a small web service. SQLite local development ignores these pool-size settings.
 
 For the most secure setup, put the web and API behind a shared custom domain so HTTP-only cookies work reliably, then set `NEXT_PUBLIC_ALLOW_REMEMBER_ME=false` to hide Remember me and ignore remembered `localStorage` tokens. Keep it `true` only for personal/trusted-device deployments that need the Render cross-subdomain fallback.
 
@@ -241,7 +252,7 @@ The web app can save the current study result as a lesson:
 - Rename or delete saved lessons from the lesson list. Delete asks for confirmation first.
 - If older browser-only lessons exist in `localStorage`, log in and use `Import to account` to copy them into persistent storage.
 
-When logged in, saved lessons are stored in the backend database and survive refreshes, browser restarts, and device changes for the same account. When logged out, the app can still keep temporary local lessons in the browser's `localStorage` under `turkce-hoca.saved-lessons.v1`, but those local drafts are not synced and can be removed if site data is cleared.
+When logged in, saved lessons are stored in the backend database and survive refreshes, browser restarts, and device changes for the same account. The lesson list is paginated and returns lightweight summaries; opening a lesson fetches the full stored study result. This avoids loading every PDF/textbook lesson payload just to show the list. When logged out, the app can still keep temporary local lessons in the browser's `localStorage` under `turkce-hoca.saved-lessons.v1`, but those local drafts are not synced and can be removed if site data is cleared.
 
 ### Authentication
 

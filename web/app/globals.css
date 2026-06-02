@@ -123,6 +123,187 @@ button:disabled {
   background: var(--accent-green);
 }
 
+.account-shortcut {
+  min-height: 38px;
+  border: 1px solid rgba(30, 30, 36, 0.08);
+  border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.56);
+  color: var(--ink-dark);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account-shortcut svg {
+  color: var(--accent-teal);
+}
+
+.app-nav {
+  width: min(1400px, 100%);
+  margin: 0 auto 20px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.app-nav button {
+  min-height: 46px;
+  border: 1px solid rgba(30, 30, 36, 0.08);
+  border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(253, 246, 227, 0.82);
+  color: var(--ink-light);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 8px 22px -18px rgba(30, 30, 36, 0.18);
+}
+
+.app-nav button.active {
+  border-color: rgba(0, 109, 119, 0.26);
+  background: var(--accent-teal);
+  color: var(--paper-bg);
+}
+
+.app-screen {
+  width: min(1400px, 100%);
+  margin: 0 auto;
+}
+
+.screen-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.screen-intro {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.screen-intro h2 {
+  margin: 0;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.8rem;
+  font-weight: 500;
+  line-height: 1.08;
+}
+
+.screen-intro p,
+.mini-summary p {
+  margin: 0;
+  color: var(--ink-light);
+  line-height: 1.45;
+}
+
+.flow-panel {
+  position: sticky;
+  top: 18px;
+}
+
+.flow-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.flow-actions .ghost-button {
+  min-height: 46px;
+}
+
+.mini-summary {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  border: 1px solid rgba(30, 30, 36, 0.08);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+  padding: 13px;
+}
+
+.section-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px;
+  background: rgba(0, 109, 119, 0.04);
+  scrollbar-width: none;
+}
+
+.section-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.section-tabs button {
+  min-height: 40px;
+  min-width: max-content;
+  border: 0;
+  border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: transparent;
+  color: var(--ink-light);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.section-tabs button.active {
+  background: var(--paper-bg);
+  color: var(--accent-teal);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.section-tabs button:disabled {
+  opacity: 0.36;
+}
+
+.section-tabs button span {
+  min-width: 20px;
+  border-radius: 999px;
+  background: rgba(0, 109, 119, 0.08);
+  color: inherit;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.page-controls {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.page-controls span,
+.list-count {
+  color: var(--ink-light);
+  font-size: 12px;
+  text-align: center;
+}
+
+.list-count {
+  margin: 0 0 10px;
+  text-align: left;
+}
+
+.paged-list {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
 .workspace {
   width: min(1400px, 100%);
   margin: 0 auto;
@@ -1380,6 +1561,14 @@ input[type="range"] {
     grid-template-columns: 1fr;
   }
 
+  .screen-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-panel {
+    position: static;
+  }
+
   .tab-list button {
     min-height: 42px;
   }
@@ -1393,7 +1582,7 @@ input[type="range"] {
 
 @media (max-width: 560px) {
   .shell {
-    padding: 0 0 calc(18px + env(safe-area-inset-bottom));
+    padding: 0 0 calc(82px + env(safe-area-inset-bottom));
     background:
       linear-gradient(rgba(253, 246, 227, 0.96), rgba(253, 246, 227, 0.96)),
       url("/paper-grain.jpg");
@@ -1410,6 +1599,67 @@ input[type="range"] {
     border-bottom: 1px solid rgba(30, 30, 36, 0.07);
     background: rgba(253, 246, 227, 0.94);
     backdrop-filter: blur(12px);
+  }
+
+  .account-shortcut {
+    position: absolute;
+    right: 12px;
+    bottom: 10px;
+    min-height: 34px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
+  .account-shortcut span {
+    display: none;
+  }
+
+  .app-nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: 100%;
+    margin: 0;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0;
+    padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(30, 30, 36, 0.08);
+    background: rgba(253, 246, 227, 0.96);
+    backdrop-filter: blur(14px);
+  }
+
+  .app-nav button {
+    min-height: 50px;
+    border: 0;
+    border-radius: 10px;
+    flex-direction: column;
+    gap: 3px;
+    background: transparent;
+    box-shadow: none;
+    font-size: 11px;
+  }
+
+  .app-nav button.active {
+    background: rgba(0, 109, 119, 0.1);
+    color: var(--accent-teal);
+  }
+
+  .app-screen {
+    width: 100%;
+  }
+
+  .screen-grid {
+    gap: 10px;
+  }
+
+  .screen-intro h2 {
+    font-size: 1.45rem;
+  }
+
+  .flow-actions {
+    grid-template-columns: 1fr;
   }
 
   .brand-mark {
@@ -1446,6 +1696,11 @@ input[type="range"] {
     border-left: 0;
     border-radius: 0;
     box-shadow: none;
+  }
+
+  .tab-panel,
+  .result-shell {
+    min-height: calc(100dvh - 142px);
   }
 
   .panel-header {
@@ -1500,6 +1755,21 @@ input[type="range"] {
     scrollbar-width: none;
   }
 
+  .section-tabs {
+    position: sticky;
+    top: 58px;
+    z-index: 20;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(30, 30, 36, 0.07);
+    background: rgba(253, 246, 227, 0.96);
+    backdrop-filter: blur(12px);
+  }
+
+  .section-tabs button {
+    min-height: 42px;
+    padding: 0 11px;
+  }
+
   .tab-list::-webkit-scrollbar {
     display: none;
   }
@@ -1518,6 +1788,7 @@ input[type="range"] {
   .filters,
   .guide-grid,
   .lesson-save-row,
+  .flow-actions,
   .lesson-card,
   .practice-hero,
   .practice-start-card,
@@ -1547,6 +1818,14 @@ input[type="range"] {
 
   .practice-modes {
     grid-template-columns: 1fr;
+  }
+
+  .page-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .page-controls .ghost-button {
+    width: 100%;
   }
 
   .practice-panel {

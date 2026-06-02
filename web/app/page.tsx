@@ -23,7 +23,6 @@ import {
   Square,
   Trophy,
   Trash2,
-  UserPlus,
   Upload,
   Volume2,
   XCircle
@@ -48,6 +47,8 @@ import {
   MAX_PLAYBACK_RATE,
   MIN_PLAYBACK_RATE,
   normalizePlaybackRate,
+  pageCount,
+  paginateItems,
   PLAYBACK_RATE_PRESETS,
   PLAYBACK_RATE_STEP,
   playbackProgress,
@@ -115,6 +116,10 @@ type AuthResponse = {
 };
 
 type AuthMode = "login" | "signup" | "reset";
+type AppScreen = "learn" | "results" | "practice" | "library" | "audio";
+type ResultSection = "overview" | "vocabulary" | "textbook" | "units" | "note";
+type LibrarySection = "lessons" | "guide" | "account";
+type AudioSection = "playback" | "voice" | "speed" | "now";
 
 type OAuthProvider = {
   provider: string;
@@ -141,6 +146,9 @@ type PracticeProgressResponse = {
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const ALLOW_REMEMBER_ME = process.env.NEXT_PUBLIC_ALLOW_REMEMBER_ME !== "false";
 const LESSON_PAGE_LIMIT = 50;
+const VOCAB_PAGE_SIZE = 8;
+const TEXTBOOK_PAGE_SIZE = 1;
+const UNIT_PAGE_SIZE = 8;
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const targetLanguages = ["English", "Turkish", "Spanish", "French", "German", "Italian"];
 const practiceModes: Array<{ value: PracticeMode; label: string; description: string }> = [
@@ -364,7 +372,15 @@ export default function Home() {
   const [currentSpokenText, setCurrentSpokenText] = useState<SpokenTextDisplay | null>(null);
   const [pwaReady, setPwaReady] = useState(false);
   const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>("browser");
-  const [workspaceTab, setWorkspaceTab] = useState<"account" | "lessons" | "practice" | "guide" | "audio">("account");
+  const [appScreen, setAppScreen] = useState<AppScreen>("learn");
+  const [resultSection, setResultSection] = useState<ResultSection>("overview");
+  const [librarySection, setLibrarySection] = useState<LibrarySection>("lessons");
+  const [audioSection, setAudioSection] = useState<AudioSection>("playback");
+  const [vocabPage, setVocabPage] = useState(1);
+  const [textbookPage, setTextbookPage] = useState(1);
+  const [unitPage, setUnitPage] = useState(1);
+  const [guidePage, setGuidePage] = useState(1);
+  const [, setWorkspaceTab] = useState<"account" | "lessons" | "practice" | "guide" | "audio">("account");
   const [ttsConfig, setTtsConfig] = useState<TTSConfigResponse | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const [activeEngine, setActiveEngine] = useState<"generated" | "browser" | "idle">("idle");
@@ -839,6 +855,11 @@ export default function Home() {
       setLessonTitle(defaultLessonTitle(payload));
       setSearch("");
       setTypeFilter("all");
+      setResultSection("overview");
+      setVocabPage(1);
+      setTextbookPage(1);
+      setUnitPage(1);
+      setAppScreen("results");
       resetPracticeSession();
     } catch (caught) {
       setError(studyErrorMessage(caught));
@@ -1161,6 +1182,14 @@ export default function Home() {
 
   function switchWorkspaceTab(nextTab: "account" | "lessons" | "practice" | "guide" | "audio") {
     setWorkspaceTab(nextTab);
+    if (nextTab === "practice") {
+      setAppScreen("practice");
+    } else if (nextTab === "audio") {
+      setAppScreen("audio");
+    } else {
+      setAppScreen("library");
+      setLibrarySection(nextTab === "guide" ? "guide" : nextTab === "account" ? "account" : "lessons");
+    }
     window.setTimeout(() => {
       tabPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 30);
@@ -1222,6 +1251,7 @@ export default function Home() {
     setPracticeError("");
     resetPracticeInteraction();
     switchWorkspaceTab("practice");
+    setAppScreen("practice");
   }
 
   function finishPracticeQuestion(question: GameQuestion, correct: boolean) {
@@ -1554,6 +1584,11 @@ export default function Home() {
     setTargetLanguage(fullLesson.result.target_language);
     setSearch("");
     setTypeFilter("all");
+    setResultSection("overview");
+    setVocabPage(1);
+    setTextbookPage(1);
+    setUnitPage(1);
+    setAppScreen("results");
     setActiveLessonId(fullLesson.id);
     setLessonTitle(fullLesson.title);
     setError("");
@@ -1723,6 +1758,36 @@ export default function Home() {
     );
   }, [savedLessons, lessonSearch]);
 
+  const pagedCards = useMemo(() => paginateItems(filteredCards, vocabPage, VOCAB_PAGE_SIZE), [filteredCards, vocabPage]);
+  const pagedTextbookSections = useMemo(
+    () => paginateItems(result?.textbook_sections ?? [], textbookPage, TEXTBOOK_PAGE_SIZE),
+    [result, textbookPage]
+  );
+  const pagedUnits = useMemo(() => paginateItems(result?.units ?? [], unitPage, UNIT_PAGE_SIZE), [result, unitPage]);
+  const pagedGuideSections = useMemo(() => paginateItems(guideSections, guidePage, 1), [guidePage]);
+  const hasResult = Boolean(result);
+  const resultTabs = useMemo(
+    () =>
+      [
+        { value: "overview" as const, label: "Overview", count: result ? 1 : 0 },
+        { value: "vocabulary" as const, label: "Vocabulary", count: result?.vocabulary_cards.length ?? 0 },
+        { value: "textbook" as const, label: "Textbook", count: result?.textbook_sections?.length ?? 0 },
+        { value: "units" as const, label: "Units", count: result?.units.length ?? 0 },
+        { value: "note" as const, label: "Note", count: result?.note ? 1 : 0 }
+      ],
+    [result]
+  );
+  const currentGuideSection = pagedGuideSections.items[0];
+
+  useEffect(() => {
+    setVocabPage((current) => Math.min(current, pageCount(filteredCards.length, VOCAB_PAGE_SIZE)));
+  }, [filteredCards.length]);
+
+  useEffect(() => {
+    setTextbookPage((current) => Math.min(current, pageCount(result?.textbook_sections?.length ?? 0, TEXTBOOK_PAGE_SIZE)));
+    setUnitPage((current) => Math.min(current, pageCount(result?.units.length ?? 0, UNIT_PAGE_SIZE)));
+  }, [result]);
+
   const currentPracticeQuestion = practiceSession?.questions[practiceIndex] ?? null;
   const activePracticeSessionId = practiceSession?.id ?? "";
   const practiceComplete = Boolean(practiceSession && (practiceIndex >= practiceSession.questions.length || practiceHearts <= 0));
@@ -1732,7 +1797,7 @@ export default function Home() {
   const practiceCanContinue = Boolean(practiceFeedback && (practiceFeedback.correct || currentPracticeQuestion?.activity !== "match" || practiceHearts <= 0));
 
   useEffect(() => {
-    if (workspaceTab !== "practice" || !practiceSession || practiceComplete) {
+    if (appScreen !== "practice" || !practiceSession || practiceComplete) {
       return;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1772,7 +1837,7 @@ export default function Home() {
     // Keyboard shortcuts delegate to the current render's practice handlers; keeping the list focused avoids callback ceremony here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    workspaceTab,
+    appScreen,
     practiceSession,
     practiceComplete,
     currentPracticeQuestion,
@@ -1783,7 +1848,7 @@ export default function Home() {
   ]);
 
   useEffect(() => {
-    if (workspaceTab !== "practice" || !activePracticeSessionId) {
+    if (appScreen !== "practice" || !activePracticeSessionId) {
       return;
     }
     const timeout = window.setTimeout(() => {
@@ -1791,11 +1856,40 @@ export default function Home() {
       practiceGameRef.current?.focus({ preventScroll: true });
     }, 40);
     return () => window.clearTimeout(timeout);
-  }, [workspaceTab, activePracticeSessionId]);
+  }, [appScreen, activePracticeSessionId]);
 
   const activeLesson = activeLessonId
     ? savedLessons.find((lesson) => lesson.id === activeLessonId)
     : null;
+
+  function openAppScreen(nextScreen: AppScreen) {
+    setAppScreen(nextScreen);
+    if (nextScreen === "practice") {
+      setWorkspaceTab("practice");
+    }
+    if (nextScreen === "audio") {
+      setWorkspaceTab("audio");
+    }
+    window.setTimeout(() => {
+      tabPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 30);
+  }
+
+  function pageControls(label: string, page: number, totalPages: number, onPage: (nextPage: number) => void) {
+    return (
+      <div className="page-controls" aria-label={`${label} pagination`}>
+        <button className="ghost-button" disabled={page <= 1} type="button" onClick={() => onPage(page - 1)}>
+          Previous
+        </button>
+        <span>
+          {label}: {page} / {totalPages}
+        </span>
+        <button className="ghost-button" disabled={page >= totalPages} type="button" onClick={() => onPage(page + 1)}>
+          Next
+        </button>
+      </div>
+    );
+  }
 
   return (
     <main className="shell">
@@ -1813,17 +1907,51 @@ export default function Home() {
             {health?.gemini_ready ? "Gemini ready" : "API waiting"} · {health?.topics ?? 0} topics
           </span>
         </div>
+        <button className="account-shortcut" type="button" onClick={() => { setLibrarySection("account"); openAppScreen("library"); }}>
+          {user ? <KeyRound size={16} /> : <LogIn size={16} />}
+          <span>{user ? "Account" : "Sign in"}</span>
+        </button>
       </header>
 
-      <section className="workspace">
-        <form className="panel input-panel" onSubmit={submitStudy}>
+      <nav className="app-nav" aria-label="Primary app screens">
+        <button className={appScreen === "learn" ? "active" : ""} type="button" onClick={() => openAppScreen("learn")}>
+          <FileText size={18} />
+          <span>Learn</span>
+        </button>
+        <button className={appScreen === "results" ? "active" : ""} type="button" onClick={() => openAppScreen("results")}>
+          <BookOpen size={18} />
+          <span>Results</span>
+        </button>
+        <button className={appScreen === "practice" ? "active" : ""} type="button" onClick={() => openAppScreen("practice")}>
+          <Gamepad2 size={18} />
+          <span>Practice</span>
+        </button>
+        <button className={appScreen === "library" ? "active" : ""} type="button" onClick={() => openAppScreen("library")}>
+          <Compass size={18} />
+          <span>Library</span>
+        </button>
+        <button className={appScreen === "audio" ? "active" : ""} type="button" onClick={() => openAppScreen("audio")}>
+          <Headphones size={18} />
+          <span>Audio</span>
+        </button>
+      </nav>
+
+      <section className={`app-screen app-screen-${appScreen}`} ref={tabPanelRef}>
+        {appScreen === "learn" ? (
+          <div className="screen-grid learn-grid">
+            <form className="panel input-panel" onSubmit={submitStudy}>
           <div className="panel-header">
             <div className="panel-title">
               <FileText size={18} />
-              <h2>Input</h2>
+                  <h2>Learn</h2>
             </div>
           </div>
           <div className="panel-body">
+                <div className="screen-intro">
+                  <span className="pill">Step 1</span>
+                  <h2>Upload, paste, or type Turkish.</h2>
+                  <p>Türkçe Hoca turns your material into vocabulary cards, textbook notes, games, and read-aloud practice.</p>
+                </div>
             <div className="field">
               <label htmlFor="text-input">Text</label>
               <textarea id="text-input" value={text} onChange={(event) => setText(event.target.value)} />
@@ -1872,63 +2000,65 @@ export default function Home() {
           </div>
         </form>
 
-        <section className="panel tab-panel" ref={tabPanelRef}>
-          <div className="tab-list" role="tablist" aria-label="Workspace tools">
-            <button
-              className={workspaceTab === "account" ? "active" : ""}
-              type="button"
-              role="tab"
-              aria-selected={workspaceTab === "account"}
-              onClick={() => switchWorkspaceTab("account")}
-            >
-              {user ? <KeyRound size={15} /> : authMode === "signup" ? <UserPlus size={15} /> : <LogIn size={15} />}
-              Account
-            </button>
-            <button
-              className={workspaceTab === "lessons" ? "active" : ""}
-              type="button"
-              role="tab"
-              aria-selected={workspaceTab === "lessons"}
-              onClick={() => switchWorkspaceTab("lessons")}
-            >
-              <BookOpen size={15} />
-              Lessons ({lessonsLoading ? "..." : savedLessons.length})
-            </button>
-            <button
-              className={workspaceTab === "practice" ? "active" : ""}
-              type="button"
-              role="tab"
-              aria-selected={workspaceTab === "practice"}
-              onClick={() => switchWorkspaceTab("practice")}
-            >
-              <Gamepad2 size={15} />
-              Practice
-            </button>
-            <button
-              className={workspaceTab === "guide" ? "active" : ""}
-              type="button"
-              role="tab"
-              aria-selected={workspaceTab === "guide"}
-              onClick={() => switchWorkspaceTab("guide")}
-            >
-              <Compass size={15} />
-              Guide
-            </button>
-            <button
-              className={workspaceTab === "audio" ? "active" : ""}
-              type="button"
-              role="tab"
-              aria-selected={workspaceTab === "audio"}
-              onClick={() => switchWorkspaceTab("audio")}
-            >
-              <Headphones size={15} />
-              Read Aloud
-            </button>
+            <section className="panel flow-panel">
+              <div className="panel-header">
+                <div className="panel-title">
+                  <Gamepad2 size={18} />
+                  <h2>Next steps</h2>
+                </div>
+              </div>
+              <div className="panel-body">
+                <div className="flow-actions">
+                  <button className="ghost-button" disabled={!hasResult} type="button" onClick={() => openAppScreen("results")}>
+                    <BookOpen size={18} />
+                    View results
+                  </button>
+                  <button className="ghost-button" disabled={!result?.vocabulary_cards.length} type="button" onClick={() => startPractice(practiceMode)}>
+                    <Gamepad2 size={18} />
+                    Start practice
+                  </button>
+                  <button className="ghost-button" type="button" onClick={() => openAppScreen("library")}>
+                    <Compass size={18} />
+                    Open library
+                  </button>
+                  <button className="ghost-button" type="button" onClick={() => openAppScreen("audio")}>
+                    <Headphones size={18} />
+                    Read aloud
+                  </button>
+                </div>
+                {result ? (
+                  <div className="mini-summary">
+                    <span className="pill">{result.study_level}</span>
+                    <strong>{result.vocabulary_cards.length} vocabulary cards ready</strong>
+                    <p>{result.preview.slice(0, 180)}</p>
+                  </div>
+                ) : (
+                  <p className="muted-copy">Analyze something first, then the app will unlock Results and Practice.</p>
+                )}
+              </div>
+            </section>
           </div>
+        ) : null}
 
-          <div className="panel-body tab-body">
-            {workspaceTab === "account" ? (
-              <>
+        {appScreen === "library" ? (
+          <section className="panel tab-panel">
+            <div className="section-tabs" role="tablist" aria-label="Library sections">
+              <button className={librarySection === "lessons" ? "active" : ""} type="button" onClick={() => setLibrarySection("lessons")}>
+                <BookOpen size={16} />
+                Lessons
+              </button>
+              <button className={librarySection === "guide" ? "active" : ""} type="button" onClick={() => setLibrarySection("guide")}>
+                <Compass size={16} />
+                Guide
+              </button>
+              <button className={librarySection === "account" ? "active" : ""} type="button" onClick={() => setLibrarySection("account")}>
+                <KeyRound size={16} />
+                Account
+              </button>
+            </div>
+            <div className="panel-body tab-body">
+              {librarySection === "account" ? (
+                <>
                 {user ? (
                   <div className="account-box">
                     <div>
@@ -2042,7 +2172,7 @@ export default function Home() {
               </>
             ) : null}
 
-            {workspaceTab === "lessons" ? (
+              {librarySection === "lessons" ? (
               <>
                 {user && localLessons.length ? (
                   <div className="revision-banner">
@@ -2118,7 +2248,58 @@ export default function Home() {
               </>
             ) : null}
 
-            {workspaceTab === "practice" ? (
+              {librarySection === "guide" ? (
+                <section className="guide-panel" aria-labelledby="guide-title">
+                  <div className="guide-hero">
+                    <span className="pill">Turkish flow</span>
+                    <h2 id="guide-title">Turkish Learning Guide</h2>
+                    <p>
+                      Turkish feels less scrambled when you stop chasing English word order. Start from the verb,
+                      read suffixes as data, and practice speaking in ready-made Turkish chunks.
+                    </p>
+                  </div>
+                  {currentGuideSection ? (
+                    <div className="guide-section" key={currentGuideSection.title}>
+                      <div className="guide-section-heading">
+                        <h3>{currentGuideSection.title}</h3>
+                        <p>{currentGuideSection.intro}</p>
+                      </div>
+                      <div className="guide-grid">
+                        {currentGuideSection.strategies.map((strategy) => (
+                          <article className="guide-card" key={strategy.title}>
+                            <h4>{strategy.title}</h4>
+                            <p>{strategy.purpose}</p>
+                            <dl>
+                              <div>
+                                <dt>Practice</dt>
+                                <dd>{strategy.drill}</dd>
+                              </div>
+                              <div>
+                                <dt>Example</dt>
+                                <dd>
+                                  <code>{strategy.example}</code>
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Notice</dt>
+                                <dd>{strategy.hint}</dd>
+                              </div>
+                            </dl>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {pageControls("Guide", pagedGuideSections.page, pagedGuideSections.totalPages, setGuidePage)}
+                </section>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
+        {appScreen === "practice" ? (
+          <section className="panel tab-panel">
+            <div className="panel-body tab-body">
               <section className="practice-panel" aria-label="Practice like a game">
                 {practiceError ? <div className="error">{practiceError}</div> : null}
 
@@ -2382,55 +2563,33 @@ export default function Home() {
                   </div>
                 ) : null}
               </section>
-            ) : null}
+            </div>
+          </section>
+        ) : null}
 
-            {workspaceTab === "guide" ? (
-              <section className="guide-panel" aria-labelledby="guide-title">
-                <div className="guide-hero">
-                  <span className="pill">Turkish flow</span>
-                  <h2 id="guide-title">Turkish Learning Guide</h2>
-                  <p>
-                    Turkish feels less scrambled when you stop chasing English word order. Start from the verb,
-                    read suffixes as data, and practice speaking in ready-made Turkish chunks.
-                  </p>
-                </div>
-                {guideSections.map((section) => (
-                  <div className="guide-section" key={section.title}>
-                    <div className="guide-section-heading">
-                      <h3>{section.title}</h3>
-                      <p>{section.intro}</p>
-                    </div>
-                    <div className="guide-grid">
-                      {section.strategies.map((strategy) => (
-                        <article className="guide-card" key={strategy.title}>
-                          <h4>{strategy.title}</h4>
-                          <p>{strategy.purpose}</p>
-                          <dl>
-                            <div>
-                              <dt>Practice</dt>
-                              <dd>{strategy.drill}</dd>
-                            </div>
-                            <div>
-                              <dt>Example</dt>
-                              <dd>
-                                <code>{strategy.example}</code>
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Notice</dt>
-                              <dd>{strategy.hint}</dd>
-                            </div>
-                          </dl>
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </section>
-            ) : null}
-
-            {workspaceTab === "audio" ? (
+        {appScreen === "audio" ? (
+          <section className="panel tab-panel">
+            <div className="section-tabs" role="tablist" aria-label="Audio controls">
+              <button className={audioSection === "playback" ? "active" : ""} type="button" onClick={() => setAudioSection("playback")}>
+                <Play size={16} />
+                Playback
+              </button>
+              <button className={audioSection === "voice" ? "active" : ""} type="button" onClick={() => setAudioSection("voice")}>
+                <Volume2 size={16} />
+                Voice
+              </button>
+              <button className={audioSection === "speed" ? "active" : ""} type="button" onClick={() => setAudioSection("speed")}>
+                <RefreshCw size={16} />
+                Speed
+              </button>
+              <button className={audioSection === "now" ? "active" : ""} type="button" onClick={() => setAudioSection("now")}>
+                <Headphones size={16} />
+                Now
+              </button>
+            </div>
+            <div className="panel-body tab-body">
               <>
+                {audioSection === "voice" ? (
                 <div className="tts-grid">
                   <div className="field">
                     <label htmlFor="voice-select">Voice</label>
@@ -2452,6 +2611,8 @@ export default function Home() {
                     </select>
                   </div>
                 </div>
+                ) : null}
+                {audioSection === "speed" ? (
                 <div className="tts-grid">
                   <div className="field">
                     <label htmlFor="playback-engine">Engine</label>
@@ -2491,6 +2652,8 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
+                ) : null}
+                {audioSection === "now" ? (
                 <label className="check-row spoken-toggle" htmlFor="show-spoken-text">
                   <input
                     checked={showSpokenText}
@@ -2503,6 +2666,8 @@ export default function Home() {
                     <small>Display the exact line being read aloud.</small>
                   </span>
                 </label>
+                ) : null}
+                {audioSection === "playback" ? (
                 <div className="player-buttons">
                   <button
                     aria-label={`Play ${readableSource.label.toLowerCase()} aloud`}
@@ -2551,6 +2716,7 @@ export default function Home() {
                     <Square size={18} />
                   </button>
                 </div>
+                ) : null}
                 <div className="playback-status" aria-live="polite">
                   <span>{speaking ? playbackLabel || "Read Aloud" : "Background playback"}</span>
                   <strong>
@@ -2597,29 +2763,48 @@ export default function Home() {
                   <p className="voice-warning">No Turkish browser voice is currently available. Playback will use the closest installed voice.</p>
                 ) : null}
               </>
-            ) : null}
-          </div>
-        </section>
-      </section>
+            </div>
+          </section>
+        ) : null}
 
-      <section className="study-output-shell">
-        {!result ? (
-          <section className="panel empty-state">
+        {appScreen === "results" ? (
+          <section className="study-output-shell">
+            {!result ? (
+              <section className="panel empty-state">
             <div>
               <Upload size={40} />
-              <p>Study output will appear here.</p>
+                  <p>No study result yet.</p>
+                  <button className="primary-button" type="button" onClick={() => openAppScreen("learn")}>
+                    Go to Learn
+                  </button>
             </div>
           </section>
         ) : (
           <>
-            <section className="panel">
+                <section className="panel result-shell">
               <div className="panel-header">
                 <div className="panel-title">
                   <FileText size={18} />
-                  <h2>{activeLesson ? "Saved Lesson" : "Extracted"}</h2>
+                      <h2>{activeLesson ? "Saved Lesson" : "Results"}</h2>
                 </div>
               </div>
+                  <div className="section-tabs result-tabs" role="tablist" aria-label="Result sections">
+                    {resultTabs.map((tab) => (
+                      <button
+                        className={resultSection === tab.value ? "active" : ""}
+                        disabled={tab.count === 0}
+                        key={tab.value}
+                        type="button"
+                        onClick={() => setResultSection(tab.value)}
+                      >
+                        {tab.label}
+                        <span>{tab.count}</span>
+                      </button>
+                    ))}
+                  </div>
               <div className="panel-body">
+                    {resultSection === "overview" ? (
+                      <>
                 {activeLesson ? (
                   <div className="revision-banner">
                     Revising saved lesson: <strong>{activeLesson.title}</strong>
@@ -2648,168 +2833,176 @@ export default function Home() {
                   <div className="preview">{result.preview}</div>
                 </div>
                 {result.extraction_warning ? <div className="warning">{result.extraction_warning}</div> : null}
-              </div>
-            </section>
+                        <div className="flow-actions">
+                          <button className="ghost-button" type="button" onClick={() => setResultSection("vocabulary")}>
+                            Vocabulary
+                          </button>
+                          <button className="ghost-button" disabled={!result.vocabulary_cards.length} type="button" onClick={() => startPractice(practiceMode)}>
+                            Practice these
+                          </button>
+                          <button className="ghost-button" type="button" onClick={() => openAppScreen("audio")}>
+                            Read aloud
+                          </button>
+                        </div>
+                      </>
+                    ) : null}
 
-            {result.textbook_sections?.length ? (
-              <section className="panel">
-                <div className="panel-header">
-                  <div className="panel-title">
-                    <BookOpen size={18} />
-                    <h2>Textbook Guide</h2>
-                  </div>
-                  <strong>{result.textbook_sections.length}</strong>
-                </div>
-                <div className="panel-body">
-                  {result.textbook_warning ? <div className="warning">{result.textbook_warning}</div> : null}
-                  <div className="textbook-section-list">
-                    {result.textbook_sections.map((section, index) => (
-                      <article className="textbook-section" key={`${section.title}-${index}`}>
-                        <div className="textbook-section-head">
-                          <div>
-                            <span className="pill">{section.section_type}</span>
-                            <h3>{section.title}</h3>
-                            <p>{section.topic}</p>
-                          </div>
-                          <span>{section.source_pages || section.level}</span>
-                        </div>
-                        <p>{section.summary}</p>
-                        <div className="textbook-grid">
-                          <div>
-                            <strong>Key vocabulary</strong>
-                            <ul>
-                              {section.key_vocabulary.slice(0, 8).map((item) => (
-                                <li key={item}>{item}</li>
-                              ))}
-                            </ul>
-                          </div>
-                          <div>
-                            <strong>Grammar focus</strong>
-                            <ul>
-                              {section.grammar_focus.slice(0, 6).map((item) => (
-                                <li key={item}>{item}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                        <div className="example-block">
-                          <strong>Translation / meaning</strong>
-                          <span>{section.translation}</span>
-                        </div>
-                        <div className="textbook-practice">
-                          <strong>Practice aligned to this section</strong>
-                          <ul>
-                            {section.practice.slice(0, 4).map((item) => (
-                              <li key={item}>{item}</li>
+                    {resultSection === "textbook" ? (
+                      <>
+                        {result.textbook_warning ? <div className="warning">{result.textbook_warning}</div> : null}
+                        {pagedTextbookSections.items.length ? (
+                          <div className="textbook-section-list paged-list">
+                            {pagedTextbookSections.items.map((section, index) => (
+                              <article className="textbook-section" key={`${section.title}-${pagedTextbookSections.start + index}`}>
+                                <div className="textbook-section-head">
+                                  <div>
+                                    <span className="pill">{section.section_type}</span>
+                                    <h3>{section.title}</h3>
+                                    <p>{section.topic}</p>
+                                  </div>
+                                  <span>{section.source_pages || section.level}</span>
+                                </div>
+                                <p>{section.summary}</p>
+                                <div className="textbook-grid">
+                                  <div>
+                                    <strong>Key vocabulary</strong>
+                                    <ul>
+                                      {section.key_vocabulary.slice(0, 8).map((item) => (
+                                        <li key={item}>{item}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                  <div>
+                                    <strong>Grammar focus</strong>
+                                    <ul>
+                                      {section.grammar_focus.slice(0, 6).map((item) => (
+                                        <li key={item}>{item}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                </div>
+                                <div className="example-block">
+                                  <strong>Translation / meaning</strong>
+                                  <span>{section.translation}</span>
+                                </div>
+                                <div className="textbook-practice">
+                                  <strong>Practice aligned to this section</strong>
+                                  <ul>
+                                    {section.practice.slice(0, 4).map((item) => (
+                                      <li key={item}>{item}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              </article>
                             ))}
-                          </ul>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-              </section>
-            ) : null}
+                          </div>
+                        ) : (
+                          <p className="muted-copy">No textbook sections were detected for this input.</p>
+                        )}
+                        {pageControls("Textbook", pagedTextbookSections.page, pagedTextbookSections.totalPages, setTextbookPage)}
+                      </>
+                    ) : null}
 
-            <section className="panel">
-              <div className="panel-header">
-                <div className="panel-title">
-                  <FileText size={18} />
-                  <h2>Vocabulary Cards</h2>
-                </div>
-                <strong>{filteredCards.length}/{result.vocabulary_cards.length}</strong>
-              </div>
-              <div className="panel-body">
-                {result.vocabulary_warning ? <div className="warning">{result.vocabulary_warning}</div> : null}
-                <div className="filters">
-                  <div className="search-box">
-                    <Search size={16} />
-                    <input aria-label="Search vocabulary" placeholder="Search words, translations, examples" value={search} onChange={(event) => setSearch(event.target.value)} />
-                  </div>
-                  <select aria-label="Filter by type" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
-                    {cardTypes.map((type) => (
-                      <option key={type} value={type}>
-                        {type === "all" ? "All types" : type}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="vocab-list">
-                  {filteredCards.map((card, index) => (
-                    <article className="vocab-card" key={`${card.turkish}-${index}`}>
-                      <div className="vocab-main">
-                        <div>
-                          <span className="pill">{card.item_type}</span>
-                          <h3>{card.turkish}</h3>
-                          <p>{card.translation}</p>
-                        </div>
-                        <div className="vocab-actions">
-                          <button
-                            aria-label={`Play ${card.turkish}`}
-                            className="icon-button"
-                            type="button"
-                            title={formatPair(card.turkish, card.translation)}
-                            onClick={() => speakSegments(wordSegments(card, result.target_language, playbackMode))}
+                    {resultSection === "vocabulary" ? (
+                      <>
+                        {result.vocabulary_warning ? <div className="warning">{result.vocabulary_warning}</div> : null}
+                        <div className="filters">
+                          <div className="search-box">
+                            <Search size={16} />
+                            <input
+                              aria-label="Search vocabulary"
+                              placeholder="Search words, translations, examples"
+                              value={search}
+                              onChange={(event) => {
+                                setSearch(event.target.value);
+                                setVocabPage(1);
+                              }}
+                            />
+                          </div>
+                          <select
+                            aria-label="Filter by type"
+                            value={typeFilter}
+                            onChange={(event) => {
+                              setTypeFilter(event.target.value);
+                              setVocabPage(1);
+                            }}
                           >
-                            <Play size={16} />
-                          </button>
-                          <button
-                            aria-label={`Play example for ${card.turkish}`}
-                            className="icon-button"
-                            type="button"
-                            title={formatPair(card.example_tr, card.example_translation)}
-                            onClick={() => speakSegments(exampleSegments(card, result.target_language, playbackMode))}
-                          >
-                            <Headphones size={16} />
-                          </button>
+                            {cardTypes.map((type) => (
+                              <option key={type} value={type}>
+                                {type === "all" ? "All types" : type}
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                      </div>
-                      <div className="example-block">
-                        <strong>{card.example_tr}</strong>
-                        <span>{card.example_translation}</span>
-                      </div>
-                      <div className="card-foot">
-                        <span>{card.cefr_level}</span>
-                        <span>{card.learner_note}</span>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            </section>
+                        <div className="list-count">
+                          Showing {pagedCards.end ? pagedCards.start + 1 : 0}-{pagedCards.end} of {filteredCards.length}
+                        </div>
+                        <div className="vocab-list paged-list">
+                          {pagedCards.items.map((card, index) => (
+                            <article className="vocab-card" key={`${card.turkish}-${pagedCards.start + index}`}>
+                              <div className="vocab-main">
+                                <div>
+                                  <span className="pill">{card.item_type}</span>
+                                  <h3>{card.turkish}</h3>
+                                  <p>{card.translation}</p>
+                                </div>
+                                <div className="vocab-actions">
+                                  <button
+                                    aria-label={`Play ${card.turkish}`}
+                                    className="icon-button"
+                                    type="button"
+                                    title={formatPair(card.turkish, card.translation)}
+                                    onClick={() => speakSegments(wordSegments(card, result.target_language, playbackMode))}
+                                  >
+                                    <Play size={16} />
+                                  </button>
+                                  <button
+                                    aria-label={`Play example for ${card.turkish}`}
+                                    className="icon-button"
+                                    type="button"
+                                    title={formatPair(card.example_tr, card.example_translation)}
+                                    onClick={() => speakSegments(exampleSegments(card, result.target_language, playbackMode))}
+                                  >
+                                    <Headphones size={16} />
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="example-block">
+                                <strong>{card.example_tr}</strong>
+                                <span>{card.example_translation}</span>
+                              </div>
+                              <div className="card-foot">
+                                <span>{card.cefr_level}</span>
+                                <span>{card.learner_note}</span>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                        {pageControls("Vocabulary", pagedCards.page, pagedCards.totalPages, setVocabPage)}
+                      </>
+                    ) : null}
 
-            <section className="panel">
-              <div className="panel-header">
-                <div className="panel-title">
-                  <FileText size={18} />
-                  <h2>Detected Units</h2>
-                </div>
-              </div>
-              <div className="panel-body">
-                <div className="unit-list">
-                  {result.units.slice(0, 12).map((unit, index) => (
-                    <div className="unit" key={`${unit.kind}-${index}`}>
-                      <span>{unit.kind}</span>
-                      <p>{unit.text}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </section>
+                    {resultSection === "units" ? (
+                      <>
+                        <div className="unit-list paged-list">
+                          {pagedUnits.items.map((unit, index) => (
+                            <div className="unit" key={`${unit.kind}-${pagedUnits.start + index}`}>
+                              <span>{unit.kind}</span>
+                              <p>{unit.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {pageControls("Units", pagedUnits.page, pagedUnits.totalPages, setUnitPage)}
+                      </>
+                    ) : null}
 
-            <section className="panel">
-              <div className="panel-header">
-                <div className="panel-title">
-                  <FileText size={18} />
-                  <h2>Study Note</h2>
-                </div>
-              </div>
-              <div className="panel-body">
-                <pre className="note">{result.note}</pre>
+                    {resultSection === "note" ? <pre className="note">{result.note}</pre> : null}
               </div>
             </section>
           </>
         )}
+      </section>
+        ) : null}
       </section>
     </main>
   );

@@ -12,6 +12,8 @@ import {
   formatPlaybackRate,
   formatPair,
   normalizePlaybackRate,
+  pageCount,
+  paginateItems,
   PLAYBACK_RATE_PRESETS,
   playbackProgress,
   readAloudSource,
@@ -177,6 +179,20 @@ test("generated audio engine selection requires explicit generated mode", () => 
   assert.equal(shouldUseGeneratedAudio("generated", true, false), false);
   assert.equal(shouldUseGeneratedAudio("browser", true, true), false);
   assert.equal(shouldUseGeneratedAudio("browser", false, true), false);
+});
+
+test("pagination helpers clamp pages and slice visible items", () => {
+  assert.equal(pageCount(0, 8), 1);
+  assert.equal(pageCount(17, 8), 3);
+
+  const first = paginateItems(["a", "b", "c", "d", "e"], 1, 2);
+  assert.deepEqual(first, { items: ["a", "b"], page: 1, totalPages: 3, start: 0, end: 2 });
+
+  const last = paginateItems(["a", "b", "c", "d", "e"], 99, 2);
+  assert.deepEqual(last, { items: ["e"], page: 3, totalPages: 3, start: 4, end: 5 });
+
+  const invalid = paginateItems(["a", "b"], Number.NaN, 0);
+  assert.deepEqual(invalid, { items: ["a"], page: 1, totalPages: 2, start: 0, end: 1 });
 });
 
 test("saved lessons serialize, deserialize, and upsert", () => {

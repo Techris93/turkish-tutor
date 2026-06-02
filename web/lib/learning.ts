@@ -327,6 +327,32 @@ export function shouldUseGeneratedAudio(
   return engine === "generated" && generatedConfigured && signedIn;
 }
 
+export function pageCount(totalItems: number, pageSize: number): number {
+  const safeTotal = Math.max(0, Math.floor(totalItems));
+  const safeSize = Math.max(1, Math.floor(pageSize));
+  return Math.max(1, Math.ceil(safeTotal / safeSize));
+}
+
+export function clampPage(page: number, totalItems: number, pageSize: number): number {
+  const safePage = Number.isFinite(page) ? Math.floor(page) : 1;
+  return Math.min(Math.max(1, safePage), pageCount(totalItems, pageSize));
+}
+
+export function paginateItems<T>(items: T[], page: number, pageSize: number): { items: T[]; page: number; totalPages: number; start: number; end: number } {
+  const safeSize = Math.max(1, Math.floor(pageSize));
+  const totalPages = pageCount(items.length, safeSize);
+  const safePage = clampPage(page, items.length, safeSize);
+  const start = (safePage - 1) * safeSize;
+  const end = Math.min(items.length, start + safeSize);
+  return {
+    items: items.slice(start, end),
+    page: safePage,
+    totalPages,
+    start,
+    end
+  };
+}
+
 export function createSavedLesson(result: StudyResponse, title?: string): SavedLesson {
   const now = new Date().toISOString();
   const fallbackTitle = [

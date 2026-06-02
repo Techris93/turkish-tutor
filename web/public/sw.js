@@ -1,5 +1,5 @@
-const CACHE_NAME = "turkce-hoca-shell-v1";
-const SHELL_ASSETS = ["/", "/icon.svg", "/manifest.webmanifest"];
+const CACHE_NAME = "turkce-hoca-shell-v2";
+const SHELL_ASSETS = ["/icon.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -19,6 +19,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
@@ -29,14 +35,16 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("/", copy));
-          return response;
-        })
-        .catch(() => caches.match("/") || Response.error())
+      fetch(request, { cache: "reload" }).catch(() => caches.match(request) || Response.error())
     );
+    return;
+  }
+
+  if (url.pathname.startsWith("/_next/")) {
+    return;
+  }
+
+  if (!SHELL_ASSETS.includes(url.pathname)) {
     return;
   }
 

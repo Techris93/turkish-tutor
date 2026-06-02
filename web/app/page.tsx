@@ -603,10 +603,32 @@ export default function Home() {
     if (!canRegister) {
       return;
     }
+    const hadServiceWorkerController = Boolean(navigator.serviceWorker.controller);
+    let reloadingForServiceWorker = false;
+    const handleControllerChange = () => {
+      if (!hadServiceWorkerController) {
+        return;
+      }
+      if (reloadingForServiceWorker) {
+        return;
+      }
+      reloadingForServiceWorker = true;
+      window.location.reload();
+    };
+    navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
     navigator.serviceWorker
-      .register("/sw.js")
-      .then(() => setPwaReady(true))
+      .register("/sw.js", { updateViaCache: "none" })
+      .then((registration) => {
+        setPwaReady(true);
+        if (registration.waiting) {
+          registration.waiting.postMessage({ type: "SKIP_WAITING" });
+        }
+        void registration.update();
+      })
       .catch(() => setPwaReady(false));
+    return () => {
+      navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+    };
   }, []);
 
   useEffect(() => {

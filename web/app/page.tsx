@@ -423,6 +423,8 @@ export default function Home() {
   const restartBrowserOnResumeRef = useRef(false);
   const browserSpeechWatchdogRef = useRef<number | null>(null);
   const pausedRef = useRef(false);
+  const tabPanelRef = useRef<HTMLElement | null>(null);
+  const practiceGameRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -1135,6 +1137,13 @@ export default function Home() {
     resetPracticeInteraction();
   }
 
+  function switchWorkspaceTab(nextTab: "account" | "lessons" | "practice" | "guide" | "audio") {
+    setWorkspaceTab(nextTab);
+    window.setTimeout(() => {
+      tabPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 30);
+  }
+
   async function persistPracticeProgress(next: PracticeProgress) {
     setPracticeProgress(next);
     if (user && activeLessonId) {
@@ -1190,7 +1199,7 @@ export default function Home() {
     setPracticeRoundCorrect(0);
     setPracticeError("");
     resetPracticeInteraction();
-    setWorkspaceTab("practice");
+    switchWorkspaceTab("practice");
   }
 
   function finishPracticeQuestion(question: GameQuestion, correct: boolean) {
@@ -1688,6 +1697,7 @@ export default function Home() {
   }, [savedLessons, lessonSearch]);
 
   const currentPracticeQuestion = practiceSession?.questions[practiceIndex] ?? null;
+  const activePracticeSessionId = practiceSession?.id ?? "";
   const practiceComplete = Boolean(practiceSession && (practiceIndex >= practiceSession.questions.length || practiceHearts <= 0));
   const practiceProgressPercent = practiceSession?.questions.length
     ? Math.min(100, Math.round((Math.min(practiceIndex, practiceSession.questions.length) / practiceSession.questions.length) * 100))
@@ -1744,6 +1754,17 @@ export default function Home() {
     practiceBuiltParts,
     practiceFeedback
   ]);
+
+  useEffect(() => {
+    if (workspaceTab !== "practice" || !activePracticeSessionId) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      practiceGameRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      practiceGameRef.current?.focus({ preventScroll: true });
+    }, 40);
+    return () => window.clearTimeout(timeout);
+  }, [workspaceTab, activePracticeSessionId]);
 
   const activeLesson = activeLessonId
     ? savedLessons.find((lesson) => lesson.id === activeLessonId)
@@ -1824,14 +1845,14 @@ export default function Home() {
           </div>
         </form>
 
-        <section className="panel tab-panel">
+        <section className="panel tab-panel" ref={tabPanelRef}>
           <div className="tab-list" role="tablist" aria-label="Workspace tools">
             <button
               className={workspaceTab === "account" ? "active" : ""}
               type="button"
               role="tab"
               aria-selected={workspaceTab === "account"}
-              onClick={() => setWorkspaceTab("account")}
+              onClick={() => switchWorkspaceTab("account")}
             >
               {user ? <KeyRound size={15} /> : authMode === "signup" ? <UserPlus size={15} /> : <LogIn size={15} />}
               Account
@@ -1841,7 +1862,7 @@ export default function Home() {
               type="button"
               role="tab"
               aria-selected={workspaceTab === "lessons"}
-              onClick={() => setWorkspaceTab("lessons")}
+              onClick={() => switchWorkspaceTab("lessons")}
             >
               <BookOpen size={15} />
               Lessons ({lessonsLoading ? "..." : savedLessons.length})
@@ -1851,7 +1872,7 @@ export default function Home() {
               type="button"
               role="tab"
               aria-selected={workspaceTab === "practice"}
-              onClick={() => setWorkspaceTab("practice")}
+              onClick={() => switchWorkspaceTab("practice")}
             >
               <Gamepad2 size={15} />
               Practice
@@ -1861,7 +1882,7 @@ export default function Home() {
               type="button"
               role="tab"
               aria-selected={workspaceTab === "guide"}
-              onClick={() => setWorkspaceTab("guide")}
+              onClick={() => switchWorkspaceTab("guide")}
             >
               <Compass size={15} />
               Guide
@@ -1871,7 +1892,7 @@ export default function Home() {
               type="button"
               role="tab"
               aria-selected={workspaceTab === "audio"}
-              onClick={() => setWorkspaceTab("audio")}
+              onClick={() => switchWorkspaceTab("audio")}
             >
               <Headphones size={15} />
               Read Aloud
@@ -2071,80 +2092,84 @@ export default function Home() {
             ) : null}
 
             {workspaceTab === "practice" ? (
-              <section className="practice-panel" aria-labelledby="practice-title">
-                <div className="practice-hero">
-                  <div>
-                    <span className="pill">Lesson arcade</span>
-                    <h2 id="practice-title">Practice like a game</h2>
-                    <p>Builds interactive drills from the Turkish words, phrases, examples, and textbook sections you upload.</p>
-                  </div>
-                  <div className="practice-score-strip">
-                    <span>
-                      <Trophy size={15} />
-                      {practiceProgress.xp} XP
-                    </span>
-                    <span>
-                      <Flame size={15} />
-                      {practiceStreak} streak
-                    </span>
-                    <span>
-                      <Heart size={15} />
-                      {practiceHearts}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="practice-modes" role="list" aria-label="Practice activities">
-                  {practiceModes.map((mode) => (
-                    <button
-                      className={practiceMode === mode.value ? "active" : ""}
-                      key={mode.value}
-                      type="button"
-                      onClick={() => {
-                        setPracticeMode(mode.value);
-                        if (result?.vocabulary_cards.length) {
-                          startPractice(mode.value);
-                        }
-                      }}
-                    >
-                      <strong>{mode.label}</strong>
-                      <span>{mode.description}</span>
-                    </button>
-                  ))}
-                </div>
-
+              <section className="practice-panel" aria-label="Practice like a game">
                 {practiceError ? <div className="error">{practiceError}</div> : null}
 
-                {!result?.vocabulary_cards.length ? (
-                  <div className="practice-empty">
-                    <Gamepad2 size={32} />
-                    <strong>Builds games from your uploaded words.</strong>
-                    <p>Analyze a photo, PDF, or text list first. Türkçe Hoca will turn the vocabulary cards into matching, listening, recall, sentence, and review games.</p>
-                  </div>
-                ) : null}
-
-                {result?.vocabulary_cards.length && !practiceSession ? (
-                  <div className="practice-start-card">
-                    <div>
-                      <span className="pill">{result.study_level}</span>
-                      <h3>{result.vocabulary_cards.length} cards ready</h3>
-                      <p>
-                        {activeLessonId
-                          ? "Progress for this saved lesson syncs to your account."
-                          : user
-                            ? "Save this lesson to sync practice progress across devices; draft progress stays local for now."
-                            : "Draft practice progress stays in this browser until you sign in and save the lesson."}
-                      </p>
+                {!practiceSession ? (
+                  <>
+                    <div className="practice-hero">
+                      <div>
+                        <span className="pill">Lesson arcade</span>
+                        <h2 id="practice-title">Practice like a game</h2>
+                        <p>Builds interactive drills from the Turkish words, phrases, examples, and textbook sections you upload.</p>
+                      </div>
+                      <div className="practice-score-strip">
+                        <span>
+                          <Trophy size={15} />
+                          {practiceProgress.xp} XP
+                        </span>
+                        <span>
+                          <Flame size={15} />
+                          {practiceStreak} streak
+                        </span>
+                        <span>
+                          <Heart size={15} />
+                          {practiceHearts}
+                        </span>
+                      </div>
                     </div>
-                    <button className="primary-button" disabled={practiceLoading} type="button" onClick={() => startPractice(practiceMode)}>
-                      {practiceLoading ? <Loader2 className="spin" size={18} /> : <Gamepad2 size={18} />}
-                      Start Practice
-                    </button>
-                  </div>
+
+                    {!result?.vocabulary_cards.length ? (
+                      <div className="practice-empty">
+                        <Gamepad2 size={32} />
+                        <strong>Builds games from your uploaded words.</strong>
+                        <p>Analyze a photo, PDF, or text list first. Türkçe Hoca will turn the vocabulary cards into matching, listening, recall, sentence, and review games.</p>
+                      </div>
+                    ) : null}
+
+                    {result?.vocabulary_cards.length ? (
+                      <div className="practice-start-card">
+                        <div>
+                          <span className="pill">{result.study_level}</span>
+                          <h3>{result.vocabulary_cards.length} cards ready</h3>
+                          <p>
+                            {activeLessonId
+                              ? "Progress for this saved lesson syncs to your account."
+                              : user
+                                ? "Save this lesson to sync practice progress across devices; draft progress stays local for now."
+                                : "Draft practice progress stays in this browser until you sign in and save the lesson."}
+                          </p>
+                        </div>
+                        <button className="primary-button" disabled={practiceLoading} type="button" onClick={() => startPractice(practiceMode)}>
+                          {practiceLoading ? <Loader2 className="spin" size={18} /> : <Gamepad2 size={18} />}
+                          Start Practice
+                        </button>
+                      </div>
+                    ) : null}
+
+                    <div className="practice-modes" role="list" aria-label="Practice activities">
+                      {practiceModes.map((mode) => (
+                        <button
+                          className={practiceMode === mode.value ? "active" : ""}
+                          key={mode.value}
+                          type="button"
+                          onClick={() => {
+                            setPracticeMode(mode.value);
+                            if (result?.vocabulary_cards.length) {
+                              startPractice(mode.value);
+                            }
+                          }}
+                        >
+                          <strong>{mode.label}</strong>
+                          <span>{mode.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 ) : null}
 
                 {practiceSession ? (
-                  <div className="practice-game">
+                  <div className="practice-game" ref={practiceGameRef} tabIndex={-1}>
                     <div className="practice-game-top">
                       <div>
                         <span className="pill">{practiceSession.level}</span>

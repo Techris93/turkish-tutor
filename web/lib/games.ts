@@ -1,4 +1,5 @@
 import { StudyResponse, VocabularyCard, languageCode } from "./learning";
+import type { SpeechSegment } from "./learning";
 
 export type PracticeActivity = "match" | "listen" | "recall" | "sentence" | "blank" | "chunk" | "boss";
 export type PracticeMode = "mix" | PracticeActivity;
@@ -489,9 +490,35 @@ export function progressAccuracy(progress: PracticeProgress): number {
   return progress.attempts > 0 ? Math.round((progress.correct / progress.attempts) * 100) : 0;
 }
 
+function promptLanguage(question: GameQuestion, targetLanguage: string): string {
+  return ["recall", "sentence", "chunk", "boss"].includes(question.activity) ? languageCode(targetLanguage) : "tr-TR";
+}
+
+export function practiceAudioSegments(question: GameQuestion, targetLanguage = "English"): SpeechSegment[] {
+  if (question.activity === "match") {
+    return question.matchPairs
+      .map((pair) => clean(pair.turkish))
+      .filter(Boolean)
+      .map((text) => ({ text, lang: "tr-TR" }));
+  }
+
+  if (question.activity === "listen") {
+    const text = clean(question.listenText || question.turkish);
+    return text ? [{ text, lang: question.listenLang || "tr-TR" }] : [];
+  }
+
+  if (question.activity === "blank") {
+    const text = clean(question.blankedText || question.prompt).replace(/_+/g, "boşluk");
+    return text ? [{ text, lang: "tr-TR" }] : [];
+  }
+
+  const text = clean(question.prompt || question.translation);
+  return text ? [{ text, lang: promptLanguage(question, targetLanguage) }] : [];
+}
+
 export function practiceListenSegment(question: GameQuestion) {
   return {
-    text: question.listenText || question.turkish,
+    text: clean(question.listenText || question.turkish),
     lang: question.listenLang || languageCode("Turkish")
   };
 }

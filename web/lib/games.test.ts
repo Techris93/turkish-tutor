@@ -7,6 +7,7 @@ import {
   buildPracticeSession,
   deserializePracticeProgressMap,
   emptyPracticeProgress,
+  practiceAudioSegments,
   progressAccuracy,
   serializePracticeProgressMap
 } from "./games";
@@ -118,6 +119,43 @@ test("match pair choices keep the same ids as their Turkish pairs", () => {
   for (const choice of question.choices) {
     assert.ok(pairIds.has(choice.id));
   }
+});
+
+test("practice speaker reads the visible match cards, not an unrelated fallback card", () => {
+  const session = buildPracticeSession(study, { mode: "match", seed: "match-audio", maxQuestions: 5 });
+  const question = session.questions.find((item) => item.activity === "match");
+  assert.ok(question);
+  assert.deepEqual(
+    practiceAudioSegments(question).map((segment) => segment.text),
+    question.matchPairs.map((pair) => pair.turkish)
+  );
+});
+
+test("practice speaker reads visible prompts without revealing hidden answers", () => {
+  const recallSession = buildPracticeSession(study, { mode: "recall", seed: "recall-audio", maxQuestions: 5 });
+  const recall = recallSession.questions.find((item) => item.activity === "recall");
+  assert.ok(recall);
+  assert.deepEqual(practiceAudioSegments(recall, "English"), [{ text: recall.prompt, lang: "en-US" }]);
+  assert.notEqual(practiceAudioSegments(recall, "English")[0].text, recall.answer);
+
+  const sentenceSession = buildPracticeSession(study, { mode: "sentence", seed: "sentence-audio", maxQuestions: 5 });
+  const sentence = sentenceSession.questions.find((item) => item.activity === "sentence");
+  assert.ok(sentence);
+  assert.deepEqual(practiceAudioSegments(sentence, "English"), [{ text: sentence.prompt, lang: "en-US" }]);
+  assert.notEqual(practiceAudioSegments(sentence, "English")[0].text, sentence.answer);
+});
+
+test("practice speaker keeps listen and blank activities tied to the current question", () => {
+  const listenSession = buildPracticeSession(study, { mode: "listen", seed: "listen-audio", maxQuestions: 5 });
+  const listen = listenSession.questions.find((item) => item.activity === "listen");
+  assert.ok(listen);
+  assert.deepEqual(practiceAudioSegments(listen), [{ text: listen.listenText, lang: "tr-TR" }]);
+
+  const blankSession = buildPracticeSession(study, { mode: "blank", seed: "blank-audio", maxQuestions: 5 });
+  const blank = blankSession.questions.find((item) => item.activity === "blank");
+  assert.ok(blank);
+  assert.equal(practiceAudioSegments(blank)[0].text.includes("boşluk"), true);
+  assert.equal(practiceAudioSegments(blank)[0].text.includes("_____"), false);
 });
 
 test("sentence builder preserves correct Turkish sentence order", () => {

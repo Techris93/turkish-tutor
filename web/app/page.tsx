@@ -81,7 +81,7 @@ import {
   buildPracticeSession,
   deserializePracticeProgressMap,
   emptyPracticeProgress,
-  practiceListenSegment,
+  practiceAudioSegments,
   progressAccuracy,
   serializePracticeProgressMap
 } from "../lib/games";
@@ -1322,7 +1322,12 @@ export default function Home() {
   }
 
   function speakPracticeQuestion(question: GameQuestion) {
-    speakSegments([practiceListenSegment(question)], question.title);
+    const segments = practiceAudioSegments(question, result?.target_language || targetLanguage);
+    if (!segments.length) {
+      setPlaybackNotice("No practice audio is available for this question.");
+      return;
+    }
+    speakSegments(segments, question.title);
   }
 
   function applyLessonPage(payload: SavedLessonListResponse, append = false) {

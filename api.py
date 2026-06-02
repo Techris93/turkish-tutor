@@ -91,11 +91,13 @@ from tts_provider import (
 )
 from textbook_breakdown import (
     build_textbook_breakdown_json_prompt,
+    fallback_textbook_breakdown,
     parse_textbook_breakdown,
 )
 from vocabulary_cards import (
     build_translation_lexicon,
     build_vocabulary_json_prompt,
+    fallback_card,
     parse_vocabulary_cards,
 )
 
@@ -351,13 +353,62 @@ def generate_text(prompt: str) -> str:
     if not init_gemini():
         raise RuntimeError(GEMINI_STATE["error"] or "Gemini is not configured.")
     client = GEMINI_STATE["client"]
-    response = client.models.generate_content(model=MODEL, contents=prompt)
+    try:
+        response = client.models.generate_content(model=MODEL, contents=prompt)
+    except Exception as exc:
+        raise RuntimeError(f"Gemini request failed: {exc}") from exc
     return (getattr(response, "text", "") or "").strip()
 
 
 async def ask_llm(prompt: str) -> str:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: generate_text(prompt))
+
+
+def provider_failure_summary(exc: RuntimeError) -> str:
+    message = str(exc)
+    if "503" in message or "UNAVAILABLE" in message or "high demand" in message.lower():
+        return "Gemini is temporarily busy."
+    if "GEMINI_API_KEY" in message or "not configured" in message:
+        return "Gemini is not configured."
+    return "The AI provider is temporarily unavailable."
+
+
+def fallback_study_note(
+    extracted: ExtractedContent,
+    cards: List[Any],
+    target_language: str,
+    study_level: str,
+    reason: str,
+) -> str:
+    """Create a useful study note when the AI provider is temporarily unavailable."""
+    lines = [
+        "AI study note is temporarily unavailable, so Türkçe Hoca used a deterministic fallback.",
+        f"Study level: {study_level}. Target language: {target_language}.",
+    ]
+    if extracted.preview:
+        lines.extend(["", "Extracted preview:", extracted.preview[:500]])
+    if cards:
+        lines.append("")
+        lines.append("Vocabulary to review:")
+        for card in cards[:16]:
+            lines.append(f"- {card.turkish}: {card.translation}")
+        lines.append("")
+        lines.append("Quick practice:")
+        for card in cards[:8]:
+            lines.append(f"- {card.example_tr} = {card.example_translation}")
+    else:
+        lines.extend(
+            [
+                "",
+                "Practice suggestion:",
+                "- Read the extracted Turkish aloud once.",
+                "- Underline verbs and suffixes.",
+                "- Make three short sentences from the text.",
+            ]
+        )
+    lines.extend(["", f"Provider note: {reason}"])
+    return "\n".join(lines)
 
 
 def normalize_level(level: str, fallback: str = "A1") -> str:
@@ -1229,7 +1280,12 @@ async def study(
                 lexicon,
             )
         except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            failure_summary = provider_failure_summary(exc)
+            cards = [
+                fallback_card(item, target_language, study_level, lexicon)
+                for item in vocabulary_items
+            ]
+            vocabulary_warning = f"AI vocabulary generation unavailable; deterministic fallback used. {failure_summary}"
 
     textbook_sections = []
     textbook_warning = ""
@@ -1248,17 +1304,35 @@ async def study(
                 study_level,
             )
         except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            failure_summary = provider_failure_summary(exc)
+            textbook_sections = fallback_textbook_breakdown(
+                extracted.textbook_sections,
+                target_language,
+                study_level,
+            )
+            textbook_warning = f"AI textbook breakdown unavailable; deterministic fallback used. {failure_summary}"
 
     prompt = build_study_prompt(extracted, target_language, study_level, context)
 
     try:
         note = await ask_llm(prompt)
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        note = fallback_study_note(
+            extracted,
+            cards,
+            target_language,
+            study_level,
+            provider_failure_summary(exc),
+        )
 
     if not note:
-        raise HTTPException(status_code=502, detail="Gemini returned an empty response.")
+        note = fallback_study_note(
+            extracted,
+            cards,
+            target_language,
+            study_level,
+            "Gemini returned an empty response.",
+        )
 
     return StudyResponse(
         source_type=extracted.source_type,

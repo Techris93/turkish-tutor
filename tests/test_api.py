@@ -24,6 +24,38 @@ class ApiTests(unittest.TestCase):
             finally:
                 os.environ.pop("DATABASE_URL", None)
 
+    def test_study_uses_fallback_cards_when_provider_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ["DATABASE_URL"] = f"sqlite:///{Path(tmpdir) / 'api.sqlite3'}"
+            try:
+                configure_database(os.environ["DATABASE_URL"])
+                drop_db()
+                init_db()
+                client = TestClient(api.app)
+                with patch.object(
+                    api,
+                    "ask_llm",
+                    new=AsyncMock(side_effect=RuntimeError("Gemini request failed: 503 UNAVAILABLE")),
+                ):
+                    response = client.post(
+                        "/api/study",
+                        data={
+                            "text": "arkadaş açmak mavi",
+                            "level": "A1",
+                            "target_language": "English",
+                        },
+                    )
+            finally:
+                os.environ.pop("DATABASE_URL", None)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["vocabulary_cards"]), 3)
+        self.assertEqual(payload["vocabulary_cards"][2]["translation"], "blue")
+        self.assertIn("deterministic fallback", payload["vocabulary_warning"])
+        self.assertNotIn("{'error'", payload["vocabulary_warning"])
+        self.assertIn("deterministic fallback", payload["note"])
+
     def _assert_study_cards(self, client: TestClient):
         card_json = """
         {

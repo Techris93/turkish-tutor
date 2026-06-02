@@ -15,6 +15,24 @@ from typing import Any, Dict, Iterable, List
 from content_intelligence import VocabularyItem
 
 
+CORE_TRANSLATION_LEXICON = {
+    "açmak": "to open",
+    "anneler günü": "Mother's Day",
+    "arkadaş": "friend",
+    "çocuk odası": "children's room",
+    "elma": "apple",
+    "gelmek": "to come",
+    "gitmek": "to go",
+    "hata yapmak": "to make a mistake",
+    "kapı": "door",
+    "kapatmak": "to close",
+    "kitap": "book",
+    "mavi": "blue",
+    "okumak": "to read",
+    "yazmak": "to write",
+}
+
+
 @dataclass(frozen=True)
 class VocabularyCard:
     turkish: str
@@ -106,7 +124,7 @@ def fallback_card(
     cefr_level: str,
     lexicon: Dict[str, str] | None = None,
 ) -> VocabularyCard:
-    translation = (lexicon or {}).get(item.text.casefold(), "")
+    translation = (lexicon or {}).get(item.text.casefold(), "") or CORE_TRANSLATION_LEXICON.get(item.text.casefold(), "")
     if not translation:
         translation = "Needs translation" if target_language.lower() == "english" else f"Needs {target_language} translation"
 
@@ -192,4 +210,3 @@ def parse_vocabulary_cards(
             "missing or extra cards were repaired deterministically."
         )
     return cards, warning
-

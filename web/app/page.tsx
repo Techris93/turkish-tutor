@@ -813,6 +813,9 @@ export default function Home() {
       setLevel(payload.study_level);
       setActiveLessonId(null);
       setLessonTitle(defaultLessonTitle(payload));
+      setSearch("");
+      setTypeFilter("all");
+      resetPracticeSession();
     } catch (caught) {
       setError(studyErrorMessage(caught));
     } finally {
@@ -1119,6 +1122,17 @@ export default function Home() {
     setPracticeBuiltParts([]);
     setPracticeMatchedIds([]);
     setPracticeSelectedMatch(null);
+  }
+
+  function resetPracticeSession() {
+    setPracticeSession(null);
+    setPracticeIndex(0);
+    setPracticeHearts(5);
+    setPracticeStreak(0);
+    setPracticeMistakes(0);
+    setPracticeRoundCorrect(0);
+    setPracticeError("");
+    resetPracticeInteraction();
   }
 
   async function persistPracticeProgress(next: PracticeProgress) {
@@ -1507,6 +1521,7 @@ export default function Home() {
     setActiveLessonId(fullLesson.id);
     setLessonTitle(fullLesson.title);
     setError("");
+    resetPracticeSession();
   }
 
   async function renameLesson(lesson: SavedLesson, title: string) {

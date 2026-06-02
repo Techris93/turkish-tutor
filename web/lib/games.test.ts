@@ -109,6 +109,17 @@ test("practice questions have useful answers and distractors", () => {
   }
 });
 
+test("match pair choices keep the same ids as their Turkish pairs", () => {
+  const session = buildPracticeSession(study, { mode: "match", seed: "match", maxQuestions: 5 });
+  const question = session.questions.find((item) => item.activity === "match");
+  assert.ok(question);
+  const pairIds = new Set(question.matchPairs.map((pair) => pair.id));
+  assert.equal(question.choices.length, question.matchPairs.length);
+  for (const choice of question.choices) {
+    assert.ok(pairIds.has(choice.id));
+  }
+});
+
 test("sentence builder preserves correct Turkish sentence order", () => {
   const session = buildPracticeSession(study, { mode: "sentence", seed: "sentence", maxQuestions: 5 });
   const question = session.questions.find((item) => item.activity === "sentence" && item.turkish === "mavi");

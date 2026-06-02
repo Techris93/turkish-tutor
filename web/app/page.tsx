@@ -2,9 +2,13 @@
 
 import {
   BookOpen,
+  CheckCircle2,
   Compass,
   FileText,
+  Flame,
+  Gamepad2,
   Headphones,
+  Heart,
   KeyRound,
   Loader2,
   LogIn,
@@ -17,9 +21,12 @@ import {
   SkipBack,
   SkipForward,
   Square,
+  Trophy,
   Trash2,
   UserPlus,
-  Upload
+  Upload,
+  Volume2,
+  XCircle
 } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -62,6 +69,22 @@ import {
   storeOAuthRememberPreference,
   storeSessionToken as persistSessionToken
 } from "../lib/authTokens";
+import {
+  GameQuestion,
+  PRACTICE_PROGRESS_KEY,
+  PracticeChoice,
+  PracticeMode,
+  PracticeProgress,
+  PracticeSession,
+  answerMatches,
+  applyPracticeAnswer,
+  buildPracticeSession,
+  deserializePracticeProgressMap,
+  emptyPracticeProgress,
+  practiceListenSegment,
+  progressAccuracy,
+  serializePracticeProgressMap
+} from "../lib/games";
 
 type HealthResponse = {
   ok: boolean;
@@ -108,11 +131,27 @@ type OAuthRedeemResponse = {
   session_token: string;
 };
 
+type PracticeProgressResponse = {
+  lesson_id: string;
+  progress: PracticeProgress;
+  exists: boolean;
+  updated_at: string;
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const ALLOW_REMEMBER_ME = process.env.NEXT_PUBLIC_ALLOW_REMEMBER_ME !== "false";
 const LESSON_PAGE_LIMIT = 50;
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const targetLanguages = ["English", "Turkish", "Spanish", "French", "German", "Italian"];
+const practiceModes: Array<{ value: PracticeMode; label: string; description: string }> = [
+  { value: "mix", label: "Recommended Mix", description: "A balanced arcade run from your uploaded words." },
+  { value: "match", label: "Match Pairs", description: "Pair Turkish words with meanings." },
+  { value: "listen", label: "Listen & Pick", description: "Hear Turkish and choose the translation." },
+  { value: "recall", label: "Translation Recall", description: "See the meaning and recall Turkish." },
+  { value: "sentence", label: "Sentence Builder", description: "Put example sentences in order." },
+  { value: "blank", label: "Fill the Blank", description: "Complete a Turkish example." },
+  { value: "chunk", label: "Chunk Builder", description: "Build phrases, verbs, and suffix-like chunks." }
+];
 const guideSections = [
   {
     title: "Understanding Turkish sentence structure",
@@ -325,7 +364,7 @@ export default function Home() {
   const [currentSpokenText, setCurrentSpokenText] = useState<SpokenTextDisplay | null>(null);
   const [pwaReady, setPwaReady] = useState(false);
   const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>("browser");
-  const [workspaceTab, setWorkspaceTab] = useState<"account" | "lessons" | "guide" | "audio">("account");
+  const [workspaceTab, setWorkspaceTab] = useState<"account" | "lessons" | "practice" | "guide" | "audio">("account");
   const [ttsConfig, setTtsConfig] = useState<TTSConfigResponse | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const [activeEngine, setActiveEngine] = useState<"generated" | "browser" | "idle">("idle");
@@ -352,6 +391,28 @@ export default function Home() {
   const [lessonTitle, setLessonTitle] = useState("");
   const [lessonSearch, setLessonSearch] = useState("");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
+  const [practiceMode, setPracticeMode] = useState<PracticeMode>("mix");
+  const [practiceSession, setPracticeSession] = useState<PracticeSession | null>(null);
+  const [practiceIndex, setPracticeIndex] = useState(0);
+  const [practiceProgress, setPracticeProgress] = useState<PracticeProgress>(() => emptyPracticeProgress());
+  const [practiceLoading, setPracticeLoading] = useState(false);
+  const [practiceError, setPracticeError] = useState("");
+  const [practiceFeedback, setPracticeFeedback] = useState<{ correct: boolean; message: string } | null>(null);
+  const [practiceHearts, setPracticeHearts] = useState(5);
+  const [practiceStreak, setPracticeStreak] = useState(0);
+  const [practiceMistakes, setPracticeMistakes] = useState(0);
+  const [practiceRoundCorrect, setPracticeRoundCorrect] = useState(0);
+  const [practiceFirstTry, setPracticeFirstTry] = useState(true);
+  const [practiceTypedAnswer, setPracticeTypedAnswer] = useState("");
+  const [practiceBuiltParts, setPracticeBuiltParts] = useState<PracticeChoice[]>([]);
+  const [practiceMatchedIds, setPracticeMatchedIds] = useState<string[]>([]);
+  const [practiceSelectedMatch, setPracticeSelectedMatch] = useState<{ side: "turkish" | "translation"; id: string } | null>(null);
+  const [localPracticeProgress, setLocalPracticeProgress] = useState<Record<string, PracticeProgress>>(() => {
+    if (typeof window === "undefined") {
+      return {};
+    }
+    return deserializePracticeProgressMap(window.localStorage.getItem(PRACTICE_PROGRESS_KEY));
+  });
   const playbackQueueRef = useRef<PlaybackQueueItem[]>([]);
   const playbackItemIndexRef = useRef(0);
   const playbackSegmentIndexRef = useRef(0);
@@ -366,6 +427,16 @@ export default function Home() {
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+
+  const currentPracticeKey = useMemo(() => {
+    if (activeLessonId) {
+      return `lesson:${activeLessonId}`;
+    }
+    if (!result) {
+      return "draft:empty";
+    }
+    return `draft:${result.source_type}:${result.source_label}:${result.study_level}:${result.preview.slice(0, 80)}`;
+  }, [activeLessonId, result]);
 
   useEffect(() => {
     let cancelled = false;
@@ -476,6 +547,51 @@ export default function Home() {
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(PRACTICE_PROGRESS_KEY, serializePracticeProgressMap(localPracticeProgress));
+  }, [localPracticeProgress]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!result) {
+      setPracticeProgress(emptyPracticeProgress());
+      setPracticeSession(null);
+      setPracticeError("");
+      return;
+    }
+
+    if (user && activeLessonId) {
+      setPracticeLoading(true);
+      setPracticeError("");
+      void apiJson<PracticeProgressResponse>(`/api/practice/progress?lesson_id=${encodeURIComponent(activeLessonId)}`)
+        .then((payload) => {
+          if (!cancelled) {
+            setPracticeProgress(payload.progress ? payload.progress : emptyPracticeProgress());
+          }
+        })
+        .catch((caught) => {
+          if (!cancelled) {
+            setPracticeProgress(emptyPracticeProgress());
+            setPracticeError(caught instanceof Error ? caught.message : "Could not load practice progress.");
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setPracticeLoading(false);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setPracticeProgress(localPracticeProgress[currentPracticeKey] ?? emptyPracticeProgress());
+    setPracticeError("");
+    return () => {
+      cancelled = true;
+    };
+  }, [result, user, activeLessonId, localPracticeProgress, currentPracticeKey]);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) {
@@ -996,6 +1112,174 @@ export default function Home() {
     speakTexts([readableSource.text]);
   }
 
+  function resetPracticeInteraction() {
+    setPracticeFeedback(null);
+    setPracticeFirstTry(true);
+    setPracticeTypedAnswer("");
+    setPracticeBuiltParts([]);
+    setPracticeMatchedIds([]);
+    setPracticeSelectedMatch(null);
+  }
+
+  async function persistPracticeProgress(next: PracticeProgress) {
+    setPracticeProgress(next);
+    if (user && activeLessonId) {
+      try {
+        const saved = await apiJson<PracticeProgressResponse>("/api/practice/progress", {
+          method: "PUT",
+          body: JSON.stringify({ lesson_id: activeLessonId, progress: next })
+        });
+        setPracticeProgress(saved.progress ?? next);
+      } catch (caught) {
+        setPracticeError(caught instanceof Error ? caught.message : "Could not save practice progress.");
+      }
+      return;
+    }
+    setLocalPracticeProgress((current) => ({ ...current, [currentPracticeKey]: next }));
+  }
+
+  async function syncPracticeProgressForLesson(lessonId: string) {
+    if (!user || practiceProgress.attempts === 0) {
+      return;
+    }
+    try {
+      await apiJson<PracticeProgressResponse>("/api/practice/progress", {
+        method: "PUT",
+        body: JSON.stringify({ lesson_id: lessonId, progress: practiceProgress })
+      });
+    } catch {
+      // Saving the lesson itself is more important; the next game answer will retry progress sync.
+    }
+  }
+
+  function startPractice(nextMode = practiceMode) {
+    if (!result?.vocabulary_cards.length) {
+      setPracticeError("Analyze or open a lesson with vocabulary cards before starting practice.");
+      return;
+    }
+    const session = buildPracticeSession(result, {
+      mode: nextMode,
+      seed: `${currentPracticeKey}:${practiceProgress.attempts}:${nextMode}`,
+      progress: practiceProgress
+    });
+    if (!session.questions.length) {
+      setPracticeError("This lesson needs at least two usable vocabulary cards for games.");
+      return;
+    }
+    stopSpeech();
+    setPracticeMode(nextMode);
+    setPracticeSession(session);
+    setPracticeIndex(0);
+    setPracticeHearts(5);
+    setPracticeStreak(0);
+    setPracticeMistakes(0);
+    setPracticeRoundCorrect(0);
+    setPracticeError("");
+    resetPracticeInteraction();
+    setWorkspaceTab("practice");
+  }
+
+  function finishPracticeQuestion(question: GameQuestion, correct: boolean) {
+    const nextProgress = applyPracticeAnswer(practiceProgress, question, correct, practiceFirstTry);
+    void persistPracticeProgress(nextProgress);
+    if (correct) {
+      setPracticeRoundCorrect((current) => current + 1);
+      setPracticeStreak((current) => current + 1);
+      setPracticeFeedback({ correct: true, message: practiceFirstTry ? "Clean hit." : "Correct on review." });
+      return;
+    }
+    setPracticeMistakes((current) => current + 1);
+    setPracticeStreak(0);
+    setPracticeFirstTry(false);
+    setPracticeHearts((current) => Math.max(0, current - 1));
+    setPracticeFeedback({ correct: false, message: "Missed. Review the answer, then continue." });
+  }
+
+  function answerPracticeChoice(answer: string) {
+    const question = currentPracticeQuestion;
+    if (!question || practiceFeedback) {
+      return;
+    }
+    finishPracticeQuestion(question, answerMatches(question, answer));
+  }
+
+  function submitBuiltPracticeAnswer() {
+    const question = currentPracticeQuestion;
+    if (!question || practiceFeedback || !practiceBuiltParts.length) {
+      return;
+    }
+    finishPracticeQuestion(question, answerMatches(question, practiceBuiltParts.map((part) => part.text)));
+  }
+
+  function submitTypedPracticeAnswer() {
+    const question = currentPracticeQuestion;
+    if (!question || practiceFeedback || !practiceTypedAnswer.trim()) {
+      return;
+    }
+    finishPracticeQuestion(question, answerMatches(question, practiceTypedAnswer));
+  }
+
+  function choosePracticePart(choice: PracticeChoice) {
+    if (practiceFeedback || practiceBuiltParts.some((part) => part.id === choice.id)) {
+      return;
+    }
+    setPracticeBuiltParts((current) => [...current, choice]);
+  }
+
+  function removePracticePart(choice: PracticeChoice) {
+    if (practiceFeedback) {
+      return;
+    }
+    setPracticeBuiltParts((current) => current.filter((part) => part.id !== choice.id));
+  }
+
+  function choosePracticeMatch(side: "turkish" | "translation", id: string) {
+    const question = currentPracticeQuestion;
+    if (!question || question.activity !== "match" || practiceFeedback || practiceMatchedIds.includes(id)) {
+      return;
+    }
+    if (!practiceSelectedMatch || practiceSelectedMatch.side === side) {
+      setPracticeSelectedMatch({ side, id });
+      return;
+    }
+    if (practiceSelectedMatch.id === id) {
+      const nextMatched = [...practiceMatchedIds, id];
+      setPracticeMatchedIds(nextMatched);
+      setPracticeSelectedMatch(null);
+      if (nextMatched.length === question.matchPairs.length) {
+        finishPracticeQuestion(question, true);
+      }
+      return;
+    }
+    setPracticeSelectedMatch(null);
+    setPracticeFirstTry(false);
+    setPracticeMistakes((current) => current + 1);
+    setPracticeStreak(0);
+    setPracticeHearts((current) => Math.max(0, current - 1));
+    setPracticeFeedback({ correct: false, message: "Those two do not match. Try another pair." });
+    window.setTimeout(() => setPracticeFeedback(null), 900);
+  }
+
+  function nextPracticeQuestion() {
+    if (!practiceSession) {
+      return;
+    }
+    const nextIndex = practiceIndex + 1;
+    resetPracticeInteraction();
+    setPracticeIndex(nextIndex);
+  }
+
+  function retryPracticeMisses() {
+    if (!result) {
+      return;
+    }
+    startPractice(practiceProgress.missedCardIds.length ? "boss" : "mix");
+  }
+
+  function speakPracticeQuestion(question: GameQuestion) {
+    speakSegments([practiceListenSegment(question)], question.title);
+  }
+
   function applyLessonPage(payload: SavedLessonListResponse, append = false) {
     setSavedLessons((current) => (append ? [...current, ...payload.lessons.filter((lesson) => !current.some((item) => item.id === lesson.id))] : payload.lessons));
     setLessonPage({ limit: payload.limit, offset: payload.offset, total: payload.total });
@@ -1172,6 +1456,7 @@ export default function Home() {
         }
         setActiveLessonId(saved.id);
         setLessonTitle(saved.title);
+        await syncPracticeProgressForLesson(saved.id);
         return;
       }
 
@@ -1387,6 +1672,64 @@ export default function Home() {
     );
   }, [savedLessons, lessonSearch]);
 
+  const currentPracticeQuestion = practiceSession?.questions[practiceIndex] ?? null;
+  const practiceComplete = Boolean(practiceSession && (practiceIndex >= practiceSession.questions.length || practiceHearts <= 0));
+  const practiceProgressPercent = practiceSession?.questions.length
+    ? Math.min(100, Math.round((Math.min(practiceIndex, practiceSession.questions.length) / practiceSession.questions.length) * 100))
+    : 0;
+  const practiceCanContinue = Boolean(practiceFeedback && (practiceFeedback.correct || currentPracticeQuestion?.activity !== "match" || practiceHearts <= 0));
+
+  useEffect(() => {
+    if (workspaceTab !== "practice" || !practiceSession || practiceComplete) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const question = currentPracticeQuestion;
+      if (!question) {
+        return;
+      }
+      if (event.key === "Enter") {
+        if (practiceCanContinue) {
+          event.preventDefault();
+          nextPracticeQuestion();
+          return;
+        }
+        if (question.activity === "sentence" || question.activity === "chunk") {
+          event.preventDefault();
+          submitBuiltPracticeAnswer();
+          return;
+        }
+        if (question.activity === "recall" && practiceTypedAnswer.trim()) {
+          event.preventDefault();
+          submitTypedPracticeAnswer();
+        }
+      }
+      const numeric = Number(event.key);
+      if (Number.isInteger(numeric) && numeric >= 1 && numeric <= question.choices.length) {
+        event.preventDefault();
+        const choice = question.choices[numeric - 1];
+        if (question.activity === "sentence" || question.activity === "chunk") {
+          choosePracticePart(choice);
+        } else {
+          answerPracticeChoice(choice.text);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+    // Keyboard shortcuts delegate to the current render's practice handlers; keeping the list focused avoids callback ceremony here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    workspaceTab,
+    practiceSession,
+    practiceComplete,
+    currentPracticeQuestion,
+    practiceCanContinue,
+    practiceTypedAnswer,
+    practiceBuiltParts,
+    practiceFeedback
+  ]);
+
   const activeLesson = activeLessonId
     ? savedLessons.find((lesson) => lesson.id === activeLessonId)
     : null;
@@ -1487,6 +1830,16 @@ export default function Home() {
             >
               <BookOpen size={15} />
               Lessons ({lessonsLoading ? "..." : savedLessons.length})
+            </button>
+            <button
+              className={workspaceTab === "practice" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={workspaceTab === "practice"}
+              onClick={() => setWorkspaceTab("practice")}
+            >
+              <Gamepad2 size={15} />
+              Practice
             </button>
             <button
               className={workspaceTab === "guide" ? "active" : ""}
@@ -1700,6 +2053,268 @@ export default function Home() {
                   </button>
                 ) : null}
               </>
+            ) : null}
+
+            {workspaceTab === "practice" ? (
+              <section className="practice-panel" aria-labelledby="practice-title">
+                <div className="practice-hero">
+                  <div>
+                    <span className="pill">Lesson arcade</span>
+                    <h2 id="practice-title">Practice like a game</h2>
+                    <p>Builds interactive drills from the Turkish words, phrases, examples, and textbook sections you upload.</p>
+                  </div>
+                  <div className="practice-score-strip">
+                    <span>
+                      <Trophy size={15} />
+                      {practiceProgress.xp} XP
+                    </span>
+                    <span>
+                      <Flame size={15} />
+                      {practiceStreak} streak
+                    </span>
+                    <span>
+                      <Heart size={15} />
+                      {practiceHearts}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="practice-modes" role="list" aria-label="Practice activities">
+                  {practiceModes.map((mode) => (
+                    <button
+                      className={practiceMode === mode.value ? "active" : ""}
+                      key={mode.value}
+                      type="button"
+                      onClick={() => {
+                        setPracticeMode(mode.value);
+                        if (result?.vocabulary_cards.length) {
+                          startPractice(mode.value);
+                        }
+                      }}
+                    >
+                      <strong>{mode.label}</strong>
+                      <span>{mode.description}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {practiceError ? <div className="error">{practiceError}</div> : null}
+
+                {!result?.vocabulary_cards.length ? (
+                  <div className="practice-empty">
+                    <Gamepad2 size={32} />
+                    <strong>Builds games from your uploaded words.</strong>
+                    <p>Analyze a photo, PDF, or text list first. Türkçe Hoca will turn the vocabulary cards into matching, listening, recall, sentence, and review games.</p>
+                  </div>
+                ) : null}
+
+                {result?.vocabulary_cards.length && !practiceSession ? (
+                  <div className="practice-start-card">
+                    <div>
+                      <span className="pill">{result.study_level}</span>
+                      <h3>{result.vocabulary_cards.length} cards ready</h3>
+                      <p>
+                        {activeLessonId
+                          ? "Progress for this saved lesson syncs to your account."
+                          : user
+                            ? "Save this lesson to sync practice progress across devices; draft progress stays local for now."
+                            : "Draft practice progress stays in this browser until you sign in and save the lesson."}
+                      </p>
+                    </div>
+                    <button className="primary-button" disabled={practiceLoading} type="button" onClick={() => startPractice(practiceMode)}>
+                      {practiceLoading ? <Loader2 className="spin" size={18} /> : <Gamepad2 size={18} />}
+                      Start Practice
+                    </button>
+                  </div>
+                ) : null}
+
+                {practiceSession ? (
+                  <div className="practice-game">
+                    <div className="practice-game-top">
+                      <div>
+                        <span className="pill">{practiceSession.level}</span>
+                        <h3>{practiceComplete ? "Practice complete" : currentPracticeQuestion?.title}</h3>
+                        <p>{practiceSession.topic || practiceSession.title}</p>
+                      </div>
+                      <button className="ghost-button" type="button" onClick={() => startPractice(practiceMode)}>
+                        <RefreshCw size={16} />
+                        Restart
+                      </button>
+                    </div>
+
+                    <div className="practice-progressbar" aria-label="Practice progress">
+                      <span style={{ width: `${practiceProgressPercent}%` }} />
+                    </div>
+
+                    <div className="practice-stats">
+                      <span>{Math.min(practiceIndex + 1, practiceSession.questions.length)} / {practiceSession.questions.length}</span>
+                      <span>{practiceRoundCorrect} correct</span>
+                      <span>{practiceMistakes} misses</span>
+                      <span>{progressAccuracy(practiceProgress)}% lifetime</span>
+                    </div>
+
+                    {practiceComplete ? (
+                      <div className="practice-complete">
+                        <Trophy size={42} />
+                        <h3>{practiceHearts <= 0 ? "Round over. Review time." : "You finished the run."}</h3>
+                        <p>
+                          You answered {practiceRoundCorrect} question{practiceRoundCorrect === 1 ? "" : "s"} correctly in this run.
+                          {practiceProgress.missedCardIds.length ? " Missed cards are queued for Boss Review." : " No missed cards are waiting right now."}
+                        </p>
+                        <div className="practice-complete-actions">
+                          <button className="primary-button" type="button" onClick={retryPracticeMisses}>
+                            <Trophy size={18} />
+                            {practiceProgress.missedCardIds.length ? "Retry missed" : "Play again"}
+                          </button>
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => {
+                              setPracticeSession(null);
+                              resetPracticeInteraction();
+                            }}
+                          >
+                            Back to activities
+                          </button>
+                        </div>
+                      </div>
+                    ) : currentPracticeQuestion ? (
+                      <div className={`practice-question practice-${currentPracticeQuestion.activity}`}>
+                        <div className="practice-question-head">
+                          <div>
+                            <span>{currentPracticeQuestion.instruction}</span>
+                            <h3>{currentPracticeQuestion.prompt}</h3>
+                          </div>
+                          <button className="icon-button" type="button" aria-label="Play question audio" onClick={() => speakPracticeQuestion(currentPracticeQuestion)}>
+                            <Volume2 size={17} />
+                          </button>
+                        </div>
+
+                        {currentPracticeQuestion.activity === "match" ? (
+                          <div className="match-board">
+                            <div>
+                              <strong>Turkish</strong>
+                              {currentPracticeQuestion.matchPairs.map((pair) => (
+                                <button
+                                  className={`${practiceMatchedIds.includes(pair.id) ? "matched" : ""} ${practiceSelectedMatch?.side === "turkish" && practiceSelectedMatch.id === pair.id ? "selected" : ""}`}
+                                  disabled={practiceMatchedIds.includes(pair.id)}
+                                  key={pair.id}
+                                  type="button"
+                                  onClick={() => choosePracticeMatch("turkish", pair.id)}
+                                >
+                                  {pair.turkish}
+                                </button>
+                              ))}
+                            </div>
+                            <div>
+                              <strong>Meaning</strong>
+                              {currentPracticeQuestion.choices.map((choice) => (
+                                <button
+                                  className={`${practiceMatchedIds.includes(choice.id) ? "matched" : ""} ${practiceSelectedMatch?.side === "translation" && practiceSelectedMatch.id === choice.id ? "selected" : ""}`}
+                                  disabled={practiceMatchedIds.includes(choice.id)}
+                                  key={choice.id}
+                                  type="button"
+                                  onClick={() => choosePracticeMatch("translation", choice.id)}
+                                >
+                                  {choice.text}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {["listen", "blank", "boss"].includes(currentPracticeQuestion.activity) ? (
+                          <div className="choice-grid">
+                            {currentPracticeQuestion.choices.map((choice, index) => (
+                              <button key={choice.id} type="button" onClick={() => answerPracticeChoice(choice.text)}>
+                                <span>{index + 1}</span>
+                                {choice.text}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {currentPracticeQuestion.activity === "recall" ? (
+                          <div className="recall-stack">
+                            <input
+                              aria-label="Type the Turkish answer"
+                              placeholder="Type Turkish, or pick a card below"
+                              type="text"
+                              value={practiceTypedAnswer}
+                              onChange={(event) => setPracticeTypedAnswer(event.target.value)}
+                            />
+                            <button className="ghost-button" disabled={!practiceTypedAnswer.trim()} type="button" onClick={submitTypedPracticeAnswer}>
+                              Check typed answer
+                            </button>
+                            <div className="choice-grid">
+                              {currentPracticeQuestion.choices.map((choice, index) => (
+                                <button key={choice.id} type="button" onClick={() => answerPracticeChoice(choice.text)}>
+                                  <span>{index + 1}</span>
+                                  {choice.text}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {currentPracticeQuestion.activity === "sentence" || currentPracticeQuestion.activity === "chunk" ? (
+                          <div className="builder-stack">
+                            <div className="builder-answer" aria-label="Built answer">
+                              {practiceBuiltParts.length ? (
+                                practiceBuiltParts.map((part) => (
+                                  <button key={part.id} type="button" onClick={() => removePracticePart(part)}>
+                                    {part.text}
+                                  </button>
+                                ))
+                              ) : (
+                                <span>Tap pieces to build the answer.</span>
+                              )}
+                            </div>
+                            <div className="choice-grid word-bank">
+                              {currentPracticeQuestion.choices.map((choice, index) => (
+                                <button
+                                  disabled={practiceBuiltParts.some((part) => part.id === choice.id)}
+                                  key={choice.id}
+                                  type="button"
+                                  onClick={() => choosePracticePart(choice)}
+                                >
+                                  <span>{index + 1}</span>
+                                  {choice.text}
+                                </button>
+                              ))}
+                            </div>
+                            <button className="primary-button" disabled={!practiceBuiltParts.length} type="button" onClick={submitBuiltPracticeAnswer}>
+                              Check order
+                            </button>
+                          </div>
+                        ) : null}
+
+                        {practiceFeedback ? (
+                          <div className={`practice-feedback ${practiceFeedback.correct ? "correct" : "wrong"}`} role="status">
+                            {practiceFeedback.correct ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+                            <div>
+                              <strong>{practiceFeedback.message}</strong>
+                              <p>
+                                Answer: <b>{currentPracticeQuestion.answer}</b>
+                                {currentPracticeQuestion.learnerNote ? ` · ${currentPracticeQuestion.learnerNote}` : ""}
+                              </p>
+                              {currentPracticeQuestion.exampleTr ? (
+                                <span>{currentPracticeQuestion.exampleTr} — {currentPracticeQuestion.exampleTranslation}</span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {practiceCanContinue ? (
+                          <button className="primary-button practice-continue" type="button" onClick={nextPracticeQuestion}>
+                            Continue
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
             ) : null}
 
             {workspaceTab === "guide" ? (

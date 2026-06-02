@@ -58,6 +58,7 @@ class User(Base):
 
     sessions: Mapped[list["AuthSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     lessons: Mapped[list["SavedLesson"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    practice_progress: Mapped[list["PracticeProgress"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -136,6 +137,29 @@ class SavedLesson(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="lessons")
+
+
+class PracticeProgress(Base):
+    __tablename__ = "practice_progress"
+    __table_args__ = (
+        Index("ux_practice_progress_user_lesson", "user_id", "lesson_id", unique=True),
+        Index("ix_practice_progress_user_updated", "user_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    lesson_id: Mapped[str] = mapped_column(ForeignKey("saved_lessons.id", ondelete="CASCADE"), index=True, nullable=False)
+    progress: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSONVariant), nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: utcnow(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: utcnow(),
+        onupdate=lambda: utcnow(),
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship(back_populates="practice_progress")
+    lesson: Mapped[SavedLesson] = relationship()
 
 
 def utcnow() -> datetime:

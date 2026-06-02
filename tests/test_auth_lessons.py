@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import api
 from auth_storage import (
     PasswordResetToken,
+    PracticeProgress as DBPracticeProgress,
     SavedLesson as DBSavedLesson,
     configure_database,
     create_oauth_state,
@@ -563,10 +564,70 @@ class AuthLessonTests(unittest.TestCase):
         self.assertEqual(owner_page["lessons"][0]["title"], "Owner lesson")
         self.assertEqual(other_page["lessons"][0]["title"], "Other lesson")
 
+    def test_practice_progress_crud_and_cross_user_protection(self):
+        owner = self.signup("practice-owner@example.com")
+        create = owner.post(
+            "/api/lessons",
+            json={"title": "Practice lesson", "result": study_result()},
+        )
+        self.assertEqual(create.status_code, 201)
+        lesson_id = create.json()["id"]
+
+        empty = owner.get(f"/api/practice/progress?lesson_id={lesson_id}")
+        self.assertEqual(empty.status_code, 200)
+        self.assertFalse(empty.json()["exists"])
+        self.assertEqual(empty.json()["progress"], {})
+
+        progress = {
+            "xp": 35,
+            "attempts": 4,
+            "correct": 3,
+            "missedCardIds": ["gel"],
+            "masteryByCard": {"gel": "learning"},
+            "lastPracticedAt": "2026-06-02T10:00:00.000Z",
+        }
+        saved = owner.put("/api/practice/progress", json={"lesson_id": lesson_id, "progress": progress})
+        self.assertEqual(saved.status_code, 200)
+        self.assertTrue(saved.json()["exists"])
+        self.assertEqual(saved.json()["progress"]["xp"], 35)
+
+        loaded = owner.get(f"/api/practice/progress?lesson_id={lesson_id}")
+        self.assertEqual(loaded.status_code, 200)
+        self.assertEqual(loaded.json()["progress"]["masteryByCard"]["gel"], "learning")
+
+        updated = owner.put("/api/practice/progress", json={"lesson_id": lesson_id, "progress": {**progress, "xp": 80}})
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["progress"]["xp"], 80)
+
+        other = self.signup("practice-other@example.com")
+        self.assertEqual(other.get(f"/api/practice/progress?lesson_id={lesson_id}").status_code, 404)
+        self.assertEqual(other.put("/api/practice/progress", json={"lesson_id": lesson_id, "progress": progress}).status_code, 404)
+        self.assertEqual(TestClient(api.app).get(f"/api/practice/progress?lesson_id={lesson_id}").status_code, 401)
+
+    def test_practice_progress_rejects_oversized_payload(self):
+        owner = self.signup("practice-size@example.com")
+        create = owner.post(
+            "/api/lessons",
+            json={"title": "Practice size lesson", "result": study_result()},
+        )
+        self.assertEqual(create.status_code, 201)
+        lesson_id = create.json()["id"]
+
+        response = owner.put(
+            "/api/practice/progress",
+            json={"lesson_id": lesson_id, "progress": {"notes": "x" * 60_000}},
+        )
+        self.assertEqual(response.status_code, 413)
+
     def test_saved_lesson_scaling_indexes_are_declared(self):
         index_names = {index.name for index in DBSavedLesson.__table__.indexes}
         self.assertIn("ix_saved_lessons_user_updated", index_names)
         self.assertIn("ix_saved_lessons_user_created", index_names)
+
+    def test_practice_progress_indexes_are_declared(self):
+        index_names = {index.name for index in DBPracticeProgress.__table__.indexes}
+        self.assertIn("ux_practice_progress_user_lesson", index_names)
+        self.assertIn("ix_practice_progress_user_updated", index_names)
 
     def test_postgres_engine_uses_configurable_pool_settings(self):
         os.environ["DATABASE_URL"] = "postgresql://user:pass@localhost:5432/turkish_tutor"

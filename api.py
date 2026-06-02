@@ -33,6 +33,7 @@ from auth_storage import (
     OAuthHandoff,
     OAuthState,
     PasswordResetToken,
+    PracticeProgress as DBPracticeProgress,
     SavedLesson as DBSavedLesson,
     User,
     create_oauth_handoff,
@@ -249,6 +250,18 @@ class SavedLessonListResponse(BaseModel):
     limit: int
     offset: int
     total: int
+
+
+class PracticeProgressUpdate(BaseModel):
+    lesson_id: str = Field(..., min_length=1, max_length=80)
+    progress: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PracticeProgressResponse(BaseModel):
+    lesson_id: str
+    progress: Dict[str, Any] = Field(default_factory=dict)
+    exists: bool = False
+    updated_at: str = ""
 
 
 class OAuthRedeemResponse(BaseModel):
@@ -495,6 +508,26 @@ def list_user_lesson_summaries(db: Session, user_id: str, limit: int, offset: in
         limit=limit,
         offset=offset,
         total=count_user_lessons(db, user_id),
+    )
+
+
+def ensure_owned_lesson(db: Session, user_id: str, lesson_id: str) -> None:
+    exists = db.scalar(
+        select(DBSavedLesson.id).where(
+            DBSavedLesson.id == lesson_id,
+            DBSavedLesson.user_id == user_id,
+        )
+    )
+    if exists is None:
+        raise HTTPException(status_code=404, detail="Saved lesson not found.")
+
+
+def practice_progress_response(progress: DBPracticeProgress, exists: bool = True) -> PracticeProgressResponse:
+    return PracticeProgressResponse(
+        lesson_id=progress.lesson_id,
+        progress=progress.progress or {},
+        exists=exists,
+        updated_at=isoformat(progress.updated_at),
     )
 
 
@@ -1101,6 +1134,54 @@ async def delete_lesson(
     db.delete(lesson)
     db.commit()
     return {"ok": True}
+
+
+@app.get("/api/practice/progress", response_model=PracticeProgressResponse)
+async def get_practice_progress(
+    lesson_id: str = Query(..., min_length=1, max_length=80),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> PracticeProgressResponse:
+    ensure_owned_lesson(db, user.id, lesson_id)
+    progress = db.scalar(
+        select(DBPracticeProgress).where(
+            DBPracticeProgress.user_id == user.id,
+            DBPracticeProgress.lesson_id == lesson_id,
+        )
+    )
+    if progress is None:
+        return PracticeProgressResponse(lesson_id=lesson_id, progress={}, exists=False, updated_at="")
+    return practice_progress_response(progress)
+
+
+@app.put("/api/practice/progress", response_model=PracticeProgressResponse)
+async def put_practice_progress(
+    payload: PracticeProgressUpdate,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> PracticeProgressResponse:
+    rate_limit(request, "practice_write", RateLimitRule(240, 3600), user.id)
+    ensure_owned_lesson(db, user.id, payload.lesson_id)
+    serialized = json.dumps(payload.progress, ensure_ascii=False)
+    if len(serialized) > 50_000:
+        raise HTTPException(status_code=413, detail="Practice progress is too large.")
+
+    progress = db.scalar(
+        select(DBPracticeProgress).where(
+            DBPracticeProgress.user_id == user.id,
+            DBPracticeProgress.lesson_id == payload.lesson_id,
+        )
+    )
+    if progress is None:
+        progress = DBPracticeProgress(user_id=user.id, lesson_id=payload.lesson_id, progress=payload.progress)
+        db.add(progress)
+    else:
+        progress.progress = payload.progress
+        progress.updated_at = utcnow()
+    db.commit()
+    db.refresh(progress)
+    return practice_progress_response(progress)
 
 
 @app.post("/api/study", response_model=StudyResponse)

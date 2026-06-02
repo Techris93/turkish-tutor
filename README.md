@@ -17,6 +17,7 @@ An adaptive AI language tutor for Turkish, powered by Google Gemini. Uses the **
 - 🌍 **Translation + CEFR examples** — translates extracted words/phrases/sentences and generates A1-C2 practice lines
 - 🧾 **Vocabulary cards from photos** — splits OCR tables into individual words/phrases, preserves compounds, and creates one translated example card per item
 - 📖 **Textbook guide from PDFs** — detects units/topics, vocabulary, grammar focus, translations, and practice aligned to uploaded course material
+- 🎮 **Gamified Practice mode** — turns uploaded vocabulary cards into matching, listening, recall, sentence-builder, fill-blank, chunk-builder, and boss-review games
 - 🔊 **Bilingual text-to-speech** — reads Turkish words/examples alone, translations alone, or translations followed by Turkish, with an optional spoken-text display
 - 🧭 **Dashboard learning guide** — quick strategies for Turkish word order, suffix stacks, listening, and speaking without translating from English
 - 💾 **Account saved lessons** — saves generated study sessions to a user account so learners can revisit and revise them later
@@ -72,7 +73,7 @@ The frontend calls `http://127.0.0.1:8000` by default. To use a different API UR
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, structured vocabulary cards, a dashboard learning guide, browser text-to-speech controls, authentication, and account-backed saved lessons.
+The web app supports text input, file uploads, CEFR level selection, target-language selection, extracted-text preview, generated study notes, detected study units, structured vocabulary cards, a dashboard learning guide, gamified practice, browser text-to-speech controls, authentication, and account-backed saved lessons.
 
 ### Local Auth And Database Setup
 
@@ -253,6 +254,17 @@ The web app can save the current study result as a lesson:
 - If older browser-only lessons exist in `localStorage`, log in and use `Import to account` to copy them into persistent storage.
 
 When logged in, saved lessons are stored in the backend database and survive refreshes, browser restarts, and device changes for the same account. The lesson list is paginated and returns lightweight summaries; opening a lesson fetches the full stored study result. This avoids loading every PDF/textbook lesson payload just to show the list. When logged out, the app can still keep temporary local lessons in the browser's `localStorage` under `turkce-hoca.saved-lessons.v1`, but those local drafts are not synced and can be removed if site data is cleared.
+
+### Gamified Practice
+
+The `Practice` dashboard tab creates deterministic mini-games from the current lesson's vocabulary cards; it does not call Gemini or any paid provider just to build games.
+
+- `Recommended Mix` combines pair matching, listen-and-pick, translation recall, sentence building, fill-the-blank, chunk building, and boss review.
+- Game rounds include hearts, XP, streaks, missed-card tracking, instant feedback, learner notes, examples, and per-question read-aloud.
+- Keyboard shortcuts work during practice: number keys choose visible options or word pieces, and `Enter` checks or continues.
+- Signed-in saved lessons sync practice progress through the backend. Draft or signed-out practice progress is stored locally under `turkce-hoca.practice-progress.v1`.
+
+Save a lesson before practicing if you want progress to follow the account across devices.
 
 ### Authentication
 

@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  ArrowLeft,
   BookOpen,
   CheckCircle2,
+  ChevronLeft,
   Compass,
   FileText,
   Flame,
@@ -2384,10 +2386,16 @@ export default function Home() {
                         <h3>{practiceComplete ? "Practice complete" : currentPracticeQuestion?.title}</h3>
                         <p>{practiceSession.topic || practiceSession.title}</p>
                       </div>
-                      <button className="ghost-button" type="button" onClick={() => startPractice(practiceMode)}>
-                        <RefreshCw size={16} />
-                        Restart
-                      </button>
+                      <div className="practice-game-actions">
+                        <button className="ghost-button" type="button" onClick={() => { setPracticeSession(null); resetPracticeInteraction(); }}>
+                          <ArrowLeft size={16} />
+                          Exit
+                        </button>
+                        <button className="ghost-button" type="button" onClick={() => startPractice(practiceMode)}>
+                          <RefreshCw size={16} />
+                          Restart
+                        </button>
+                      </div>
                     </div>
 
                     <div className="practice-progressbar" aria-label="Practice progress">
@@ -2785,8 +2793,14 @@ export default function Home() {
               <div className="panel-header">
                 <div className="panel-title">
                   <FileText size={18} />
-                      <h2>{activeLesson ? "Saved Lesson" : "Results"}</h2>
+                  <h2>{activeLesson ? "Saved Lesson" : "Results"}</h2>
                 </div>
+                {activeLesson ? (
+                  <button className="ghost-button" type="button" style={{ minHeight: "30px", padding: "0 8px", fontSize: "12px" }} onClick={() => { setLibrarySection("lessons"); openAppScreen("library"); }}>
+                    <ArrowLeft size={14} />
+                    <span>Back to Library</span>
+                  </button>
+                ) : null}
               </div>
                   <div className="section-tabs result-tabs" role="tablist" aria-label="Result sections">
                     {resultTabs.map((tab) => (
@@ -2834,6 +2848,10 @@ export default function Home() {
                 </div>
                 {result.extraction_warning ? <div className="warning">{result.extraction_warning}</div> : null}
                         <div className="flow-actions">
+                          <button className="ghost-button" type="button" onClick={() => openAppScreen("learn")}>
+                            <ArrowLeft size={18} />
+                            Back to Learn
+                          </button>
                           <button className="ghost-button" type="button" onClick={() => setResultSection("vocabulary")}>
                             Vocabulary
                           </button>

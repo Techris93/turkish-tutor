@@ -362,7 +362,7 @@ export function buildPracticeSession(study: StudyResponse, options: BuildOptions
     const missed = new Set(options.progress?.missedCardIds ?? []);
     const targetCards = missed.size > 0
       ? shuffledCards.filter(({ id }) => missed.has(id))
-      : shuffledCards.filter(({ id }) => !["strong", "mastered"].includes(options.progress?.masteryByCard[id] ?? "new"));
+      : shuffledCards.filter(({ id }) => !["strong", "mastered"].includes(options.progress?.masteryByCard?.[id] ?? "new"));
 
     for (const { card, index } of targetCards) {
       const question = buildCardQuestion("boss", card, index, alternatives, random, serial);
@@ -434,7 +434,7 @@ export function buildPracticeSession(study: StudyResponse, options: BuildOptions
 
     if (mode === "mix") {
       const missed = new Set(options.progress?.missedCardIds ?? []);
-      const lowMastery = shuffledCards.filter(({ id }) => missed.has(id) || !["strong", "mastered"].includes(options.progress?.masteryByCard[id] ?? "new"));
+      const lowMastery = shuffledCards.filter(({ id }) => missed.has(id) || !["strong", "mastered"].includes(options.progress?.masteryByCard?.[id] ?? "new"));
       for (const { card, index } of lowMastery.slice(0, 4)) {
         const question = buildCardQuestion("boss", card, index, alternatives, random, serial);
         serial += 1;

@@ -84,6 +84,7 @@ import {
   buildPracticeSession,
   deserializePracticeProgressMap,
   emptyPracticeProgress,
+  normalizePracticeProgress,
   practiceAudioSegments,
   progressAccuracy,
   serializePracticeProgressMap
@@ -588,7 +589,7 @@ export default function Home() {
       void apiJson<PracticeProgressResponse>(`/api/practice/progress?lesson_id=${encodeURIComponent(activeLessonId)}`)
         .then((payload) => {
           if (!cancelled) {
-            setPracticeProgress(payload.progress ? payload.progress : emptyPracticeProgress());
+            setPracticeProgress(payload.progress ? normalizePracticeProgress(payload.progress) : emptyPracticeProgress());
           }
         })
         .catch((caught) => {
@@ -1206,7 +1207,7 @@ export default function Home() {
           method: "PUT",
           body: JSON.stringify({ lesson_id: activeLessonId, progress: next })
         });
-        setPracticeProgress(saved.progress ?? next);
+        setPracticeProgress(saved.progress ? normalizePracticeProgress(saved.progress) : next);
       } catch (caught) {
         setPracticeError(caught instanceof Error ? caught.message : "Could not save practice progress.");
       }
@@ -1352,7 +1353,7 @@ export default function Home() {
     if (!result) {
       return;
     }
-    startPractice(practiceProgress.missedCardIds.length ? "boss" : "mix");
+    startPractice((practiceProgress?.missedCardIds || []).length ? "boss" : "mix");
   }
 
   function speakPracticeQuestion(question: GameQuestion) {
@@ -2420,7 +2421,7 @@ export default function Home() {
 
                     {(result?.vocabulary_cards || []).length ? (
                       <div className="practice-start-card">
-                        <div>
+                        <div style={{ marginRight: "16px" }}>
                           <span className="pill">{result?.study_level}</span>
                           <h3>{(result?.vocabulary_cards || []).length} cards ready</h3>
                           <p>
@@ -2431,10 +2432,7 @@ export default function Home() {
                                 : "Draft practice progress stays in this browser until you sign in and save the lesson."}
                           </p>
                         </div>
-                        <button className="primary-button" disabled={practiceLoading} type="button" onClick={() => startPractice(practiceMode)}>
-                          {practiceLoading ? <Loader2 className="spin" size={18} /> : <Gamepad2 size={18} />}
-                          Start Practice
-                        </button>
+                        <Gamepad2 size={32} style={{ color: "var(--accent-teal)", opacity: 0.25, minWidth: "32px" }} />
                       </div>
                     ) : null}
 
@@ -2526,12 +2524,12 @@ export default function Home() {
                         <h3>{practiceHearts <= 0 ? "Round over. Review time." : "You finished the run."}</h3>
                         <p>
                           You answered {practiceRoundCorrect} question{practiceRoundCorrect === 1 ? "" : "s"} correctly in this run.
-                          {practiceProgress.missedCardIds.length ? " Missed cards are queued for Boss Review." : " No missed cards are waiting right now."}
+                          {(practiceProgress?.missedCardIds || []).length ? " Missed cards are queued for Boss Review." : " No missed cards are waiting right now."}
                         </p>
                         <div className="practice-complete-actions">
                           <button className="primary-button" type="button" onClick={retryPracticeMisses}>
                             <Trophy size={18} />
-                            {practiceProgress.missedCardIds.length ? "Retry missed" : "Play again"}
+                            {(practiceProgress?.missedCardIds || []).length ? "Retry missed" : "Play again"}
                           </button>
                           <button
                             className="ghost-button"

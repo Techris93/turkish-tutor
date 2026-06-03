@@ -960,10 +960,20 @@ input:focus {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+  width: 100%;
+  min-width: 0;
 }
 
-.practice-game-top > div {
+.practice-game-top > div:first-child {
+  flex: 1;
   min-width: 0;
+}
+
+.practice-game-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .practice-game-top p {
@@ -1042,11 +1052,14 @@ input:focus {
 
 .match-board {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
 }
 
 .match-board > div {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .match-board strong {
@@ -1061,6 +1074,8 @@ input:focus {
   padding: 10px 12px;
   text-align: left;
   overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .match-board button.selected {
@@ -1858,7 +1873,7 @@ input[type="range"] {
   }
 
   .practice-panel {
-    gap: 10px;
+    gap: 8px;
   }
 
   .practice-hero,
@@ -1871,25 +1886,39 @@ input[type="range"] {
   .practice-hero,
   .practice-start-card,
   .practice-game {
-    padding: 12px;
+    padding: 10px;
   }
 
   .practice-game {
     min-height: auto;
+    gap: 10px;
+  }
+
+  .practice-question {
+    gap: 10px;
   }
 
   .practice-modes button {
     min-height: 64px;
   }
 
+  .practice-question-head {
+    gap: 8px;
+  }
+
+  .practice-question-head span {
+    font-size: 0.68rem;
+  }
+
   .practice-question-head h3 {
-    font-size: 1.32rem;
+    font-size: 1.15rem;
   }
 
   .choice-grid button,
   .match-board button {
-    min-height: 56px;
-    padding: 10px 12px;
+    min-height: 44px;
+    padding: 8px 10px;
+    font-size: 0.84rem;
   }
 
   .practice-score-strip,

@@ -375,30 +375,60 @@ export function buildPracticeSession(study: StudyResponse, options: BuildOptions
       }
     }
   } else {
-    if ((mode === "mix" || mode === "match") && cards.length >= 2) {
+    if (mode === "match") {
+      // Generate multiple match questions to cover all cards in the list
+      for (let i = 0; i < shuffledCards.length; i += 5) {
+        const chunk = shuffledCards.slice(i, i + 5);
+        if (chunk.length >= 2) {
+          const match = buildMatchQuestion(chunk, random);
+          if (match) {
+            questions.push(match);
+          }
+        }
+      }
+    }
+
+    if (mode === "mix" && cards.length >= 2) {
       const match = buildMatchQuestion(cards, random);
       if (match) {
         questions.push(match);
       }
     }
 
-    const cycle: PracticeActivity[] = mode === "mix" ? ["listen", "recall", "sentence", "blank", "chunk"] : [mode as PracticeActivity];
-    for (const { card, index } of shuffledCards) {
-      for (const activity of cycle) {
-        if (activity === "match" || activity === "boss") {
-          continue;
+    if (mode !== "match") {
+      const cycle: PracticeActivity[] = mode === "mix" ? ["listen", "recall", "sentence", "blank", "chunk"] : [mode as PracticeActivity];
+      const cardStates = shuffledCards.map(({ card, index }) => {
+        const cardActivities = shuffle([...cycle], random);
+        return {
+          card,
+          index,
+          activities: cardActivities,
+          activityIndex: 0
+        };
+      });
+
+      let active = true;
+      while (active && questions.length < maxQuestions) {
+        active = false;
+        for (const state of cardStates) {
+          while (state.activityIndex < state.activities.length) {
+            const activity = state.activities[state.activityIndex];
+            state.activityIndex++;
+            if (activity === "match" || activity === "boss") {
+              continue;
+            }
+            const question = buildCardQuestion(activity, state.card, state.index, alternatives, random, serial);
+            if (question) {
+              serial += 1;
+              questions.push(question);
+              active = true;
+              break;
+            }
+          }
+          if (questions.length >= maxQuestions) {
+            break;
+          }
         }
-        const question = buildCardQuestion(activity, card, index, alternatives, random, serial);
-        serial += 1;
-        if (question) {
-          questions.push(question);
-        }
-        if (questions.length >= maxQuestions) {
-          break;
-        }
-      }
-      if (questions.length >= maxQuestions) {
-        break;
       }
     }
 

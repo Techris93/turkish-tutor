@@ -202,3 +202,67 @@ test("local practice progress serialization is resilient", () => {
   assert.equal(roundTrip.lesson1.masteryByCard["0-gelmek"], "mastered");
   assert.deepEqual(deserializePracticeProgressMap("not json"), {});
 });
+
+test("buildPracticeSession covers all cards via round-robin interleaving", () => {
+  const session = buildPracticeSession(study, { mode: "mix", seed: "round-robin", maxQuestions: 20 });
+  const coveredCardIds = new Set(session.questions.filter(q => q.activity !== "match" && q.activity !== "boss").map(q => q.cardId));
+  // Since we have 4 cards and maxQuestions is 20, all 4 cards must be covered in the session.
+  assert.equal(coveredCardIds.size, 4);
+});
+
+test("buildPracticeSession match mode covers all cards across multiple questions", () => {
+  // Let's create a temporary study response with 7 cards to force multiple match blocks (chunks of 5)
+  const study7: StudyResponse = {
+    ...study,
+    vocabulary_cards: [
+      ...study.vocabulary_cards,
+      {
+        turkish: "kırmızı",
+        item_type: "adjective",
+        translation: "red",
+        cefr_level: "A1",
+        example_tr: "Kırmızı gül.",
+        example_translation: "Red rose.",
+        learner_note: "Color adjective.",
+        tts_word: "kırmızı",
+        tts_sentence: "Kırmızı gül."
+      },
+      {
+        turkish: "yeşil",
+        item_type: "adjective",
+        translation: "green",
+        cefr_level: "A1",
+        example_tr: "Yeşil çimen.",
+        example_translation: "Green grass.",
+        learner_note: "Color adjective.",
+        tts_word: "yeşil",
+        tts_sentence: "Yeşil çimen."
+      },
+      {
+        turkish: "sarı",
+        item_type: "adjective",
+        translation: "yellow",
+        cefr_level: "A1",
+        example_tr: "Sarı güneş.",
+        example_translation: "Yellow sun.",
+        learner_note: "Color adjective.",
+        tts_word: "sarı",
+        tts_sentence: "Sarı güneş."
+      }
+    ]
+  };
+  const session = buildPracticeSession(study7, { mode: "match", seed: "match-all", maxQuestions: 10 });
+  // With 7 cards, match mode should split them into 2 questions (chunk 1: 5 cards, chunk 2: 2 cards)
+  assert.equal(session.questions.length, 2);
+  assert.equal(session.questions[0].activity, "match");
+  assert.equal(session.questions[1].activity, "match");
+
+  const allMatchedWords = new Set<string>();
+  for (const q of session.questions) {
+    for (const pair of q.matchPairs) {
+      allMatchedWords.add(pair.turkish);
+    }
+  }
+  // All 7 words must be covered across the match screens
+  assert.equal(allMatchedWords.size, 7);
+});

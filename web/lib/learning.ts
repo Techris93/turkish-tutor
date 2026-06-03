@@ -103,8 +103,8 @@ export function languageCode(language: string): string {
   return targetLanguageCodes[language.trim().toLowerCase()] ?? "en-US";
 }
 
-function normalizeSpeechText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+function normalizeSpeechText(text: string | null | undefined): string {
+  return (text || "").replace(/\s+/g, " ").trim();
 }
 
 export function splitSpeechText(text: string, maxChars = MAX_SPEECH_SEGMENT_CHARS): string[] {

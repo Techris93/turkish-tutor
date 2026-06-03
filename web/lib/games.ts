@@ -76,11 +76,11 @@ const activityTitles: Record<PracticeActivity, string> = {
   boss: "Boss Review"
 };
 
-function clean(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+function clean(text: string | null | undefined): string {
+  return (text || "").replace(/\s+/g, " ").trim();
 }
 
-function normalizeAnswer(text: string): string {
+function normalizeAnswer(text: string | null | undefined): string {
   return clean(text)
     .toLocaleLowerCase("tr-TR")
     .replace(/[.,!?;:()[\]{}'"`´’‘“”]+/g, "")

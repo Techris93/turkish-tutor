@@ -88,6 +88,7 @@ import {
   progressAccuracy,
   serializePracticeProgressMap
 } from "../lib/games";
+import { SAMPLE_LESSONS } from "../lib/sampleLessons";
 
 type HealthResponse = {
   ok: boolean;
@@ -1561,7 +1562,7 @@ export default function Home() {
     }
   }
 
-  async function openLesson(lesson: SavedLesson) {
+  async function openLesson(lesson: SavedLesson, targetScreen: "results" | "practice" = "results") {
     stopSpeech();
     setLessonError("");
     let fullLesson = lesson;
@@ -1590,7 +1591,7 @@ export default function Home() {
     setVocabPage(1);
     setTextbookPage(1);
     setUnitPage(1);
-    setAppScreen("results");
+    setAppScreen(targetScreen);
     setActiveLessonId(fullLesson.id);
     setLessonTitle(fullLesson.title);
     setError("");
@@ -1735,6 +1736,9 @@ export default function Home() {
   }
 
   function lessonMeta(lesson: SavedLesson) {
+    if (lesson.id.startsWith("sample-")) {
+      return `${lesson.result?.study_level || "Any"} · Default Curated Resource`;
+    }
     if (!lesson.result) {
       return `Saved · ${new Date(lesson.created_at).toLocaleDateString()}`;
     }
@@ -1759,6 +1763,25 @@ export default function Home() {
         .includes(query)
     );
   }, [savedLessons, lessonSearch]);
+
+  const filteredSampleLessons = useMemo(() => {
+    const query = lessonSearch.trim().toLowerCase();
+    if (!query) {
+      return SAMPLE_LESSONS;
+    }
+    return SAMPLE_LESSONS.filter((lesson) =>
+      [
+        lesson.title,
+        lesson.result?.source_label,
+        lesson.result?.preview,
+        lesson.result?.target_language,
+        lesson.result?.study_level
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [lessonSearch]);
 
   const pagedCards = useMemo(() => paginateItems(filteredCards, vocabPage, VOCAB_PAGE_SIZE), [filteredCards, vocabPage]);
   const pagedTextbookSections = useMemo(
@@ -2252,6 +2275,27 @@ export default function Home() {
                     {lessonsLoading ? "Loading..." : `Load more (${savedLessons.length}/${lessonPage.total})`}
                   </button>
                 ) : null}
+
+                {filteredSampleLessons.length ? (
+                  <div style={{ marginTop: "28px" }}>
+                    <h3 style={{ fontSize: "0.78rem", color: "var(--ink-light)", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "0.6px", fontWeight: 800 }}>
+                      Curated Sample Lessons
+                    </h3>
+                    <div className="lesson-list">
+                      {filteredSampleLessons.map((lesson) => (
+                        <article className={`lesson-card ${lesson.id === activeLessonId ? "active" : ""}`} key={lesson.id}>
+                          <button className="lesson-open" type="button" onClick={() => void openLesson(lesson)}>
+                            <strong>{lesson.title}</strong>
+                            <span>{lessonMeta(lesson)}</span>
+                          </button>
+                          <div className="lesson-actions" style={{ paddingRight: "8px" }}>
+                            <span className="pill" style={{ background: "rgba(0, 109, 119, 0.08)", color: "var(--accent-teal)", fontSize: "0.68rem", fontWeight: 800 }}>Demo</span>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </>
             ) : null}
 
@@ -2335,10 +2379,41 @@ export default function Home() {
                     </div>
 
                     {!result?.vocabulary_cards.length ? (
-                      <div className="practice-empty">
-                        <Gamepad2 size={32} />
-                        <strong>Builds games from your uploaded words.</strong>
-                        <p>Analyze a photo, PDF, or text list first. Türkçe Hoca will turn the vocabulary cards into matching, listening, recall, sentence, and review games.</p>
+                      <div style={{ display: "grid", gap: "14px", width: "100%" }}>
+                        <div className="practice-empty" style={{ minHeight: "150px", padding: "18px" }}>
+                          <Gamepad2 size={32} />
+                          <strong>Start Practicing Instantly</strong>
+                          <p>
+                            Select one of our default curated practice resources below to start playing matching, listening, and sentence building games in one click:
+                          </p>
+                        </div>
+                        <div className="lesson-list">
+                          {SAMPLE_LESSONS.map((lesson) => (
+                            <article className="lesson-card" key={lesson.id} style={{ background: "rgba(255, 255, 255, 0.76)", padding: "12px", border: "1px solid rgba(0, 109, 119, 0.12)" }}>
+                              <button
+                                className="lesson-open"
+                                type="button"
+                                onClick={() => {
+                                  void openLesson(lesson, "practice");
+                                  window.setTimeout(() => {
+                                    startPractice("mix");
+                                  }, 80);
+                                }}
+                                style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", width: "100%", textAlign: "left", background: "none", border: 0, padding: 0 }}
+                              >
+                                <strong style={{ fontSize: "0.95rem", color: "var(--accent-teal)" }}>{lesson.title}</strong>
+                                <span style={{ fontSize: "0.76rem", color: "var(--ink-light)", marginTop: "4px" }}>
+                                  {lesson.result?.vocabulary_cards.length} cards · Tap to practice now
+                                </span>
+                              </button>
+                            </article>
+                          ))}
+                        </div>
+                        <div className="practice-empty" style={{ border: "1px dashed var(--panel-line)", minHeight: "110px", padding: "14px" }}>
+                          <FileText size={20} />
+                          <strong>Have your own vocabulary lists?</strong>
+                          <p>Go to the **Learn** tab, paste a list of words or upload an image/document, and Türkçe Hoca will generate games for you.</p>
+                        </div>
                       </div>
                     ) : null}
 
@@ -2380,6 +2455,36 @@ export default function Home() {
                         </button>
                       ))}
                     </div>
+
+                    {result?.vocabulary_cards.length ? (
+                      <div style={{ marginTop: "20px", borderTop: "1px solid var(--panel-line)", paddingTop: "16px", width: "100%" }}>
+                        <span style={{ fontSize: "0.74rem", color: "var(--ink-light)", display: "block", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 800 }}>
+                          Try Curated Sample Lessons:
+                        </span>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                          {SAMPLE_LESSONS.map((lesson) => (
+                            <button
+                              key={lesson.id}
+                              type="button"
+                              className={`ghost-button ${activeLessonId === lesson.id ? "active" : ""}`}
+                              onClick={() => {
+                                void openLesson(lesson, "practice");
+                              }}
+                              style={{
+                                fontSize: "0.76rem",
+                                minHeight: "34px",
+                                padding: "0 10px",
+                                background: activeLessonId === lesson.id ? "rgba(0, 109, 119, 0.08)" : "rgba(255, 255, 255, 0.5)",
+                                borderColor: activeLessonId === lesson.id ? "var(--accent-teal)" : "rgba(30, 30, 36, 0.08)"
+                              }}
+                              disabled={activeLessonId === lesson.id}
+                            >
+                              {lesson.title.replace(" (İsimler)", "").replace(" (Günlük Konuşma)", "").replace(" (Restoranda)", "")}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </>
                 ) : null}
 

@@ -346,21 +346,16 @@ export function buildPracticeSession(study: StudyResponse, options: BuildOptions
   const questions: GameQuestion[] = [];
   const alternatives = cards.map((item) => item.card);
 
-  if ((mode === "mix" || mode === "match") && cards.length >= 2) {
-    const match = buildMatchQuestion(cards, random);
-    if (match) {
-      questions.push(match);
-    }
-  }
-
-  const cycle: PracticeActivity[] = mode === "mix" ? ["listen", "recall", "sentence", "blank", "chunk"] : [mode as PracticeActivity];
   let serial = 0;
-  for (const { card, index } of shuffledCards) {
-    for (const activity of cycle) {
-      if (activity === "match" || activity === "boss") {
-        continue;
-      }
-      const question = buildCardQuestion(activity, card, index, alternatives, random, serial);
+
+  if (mode === "boss") {
+    const missed = new Set(options.progress?.missedCardIds ?? []);
+    const targetCards = missed.size > 0
+      ? shuffledCards.filter(({ id }) => missed.has(id))
+      : shuffledCards.filter(({ id }) => !["strong", "mastered"].includes(options.progress?.masteryByCard[id] ?? "new"));
+
+    for (const { card, index } of targetCards) {
+      const question = buildCardQuestion("boss", card, index, alternatives, random, serial);
       serial += 1;
       if (question) {
         questions.push(question);
@@ -369,21 +364,47 @@ export function buildPracticeSession(study: StudyResponse, options: BuildOptions
         break;
       }
     }
-    if (questions.length >= maxQuestions) {
-      break;
+  } else {
+    if ((mode === "mix" || mode === "match") && cards.length >= 2) {
+      const match = buildMatchQuestion(cards, random);
+      if (match) {
+        questions.push(match);
+      }
     }
-  }
 
-  const missed = new Set(options.progress?.missedCardIds ?? []);
-  const lowMastery = shuffledCards.filter(({ id }) => missed.has(id) || !["strong", "mastered"].includes(options.progress?.masteryByCard[id] ?? "new"));
-  for (const { card, index } of lowMastery.slice(0, 4)) {
-    if (mode !== "mix" && mode !== "boss") {
-      break;
+    const cycle: PracticeActivity[] = mode === "mix" ? ["listen", "recall", "sentence", "blank", "chunk"] : [mode as PracticeActivity];
+    for (const { card, index } of shuffledCards) {
+      for (const activity of cycle) {
+        if (activity === "match" || activity === "boss") {
+          continue;
+        }
+        const question = buildCardQuestion(activity, card, index, alternatives, random, serial);
+        serial += 1;
+        if (question) {
+          questions.push(question);
+        }
+        if (questions.length >= maxQuestions) {
+          break;
+        }
+      }
+      if (questions.length >= maxQuestions) {
+        break;
+      }
     }
-    const question = buildCardQuestion("boss", card, index, alternatives, random, serial);
-    serial += 1;
-    if (question) {
-      questions.push(question);
+
+    if (mode === "mix") {
+      const missed = new Set(options.progress?.missedCardIds ?? []);
+      const lowMastery = shuffledCards.filter(({ id }) => missed.has(id) || !["strong", "mastered"].includes(options.progress?.masteryByCard[id] ?? "new"));
+      for (const { card, index } of lowMastery.slice(0, 4)) {
+        const question = buildCardQuestion("boss", card, index, alternatives, random, serial);
+        serial += 1;
+        if (question) {
+          questions.push(question);
+        }
+        if (questions.length >= maxQuestions) {
+          break;
+        }
+      }
     }
   }
 

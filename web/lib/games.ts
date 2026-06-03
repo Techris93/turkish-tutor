@@ -449,7 +449,7 @@ export function buildPracticeSession(study: StudyResponse, options: BuildOptions
   }
 
   return {
-    id: `practice-${hashString(`${study.source_label}:${study.preview}:${mode}:${questions.length}`).toString(16)}`,
+    id: `practice-${hashString(`${study.source_label}:${study.preview || ""}:${mode}:${questions.length}`).toString(16)}`,
     title: sessionTitle(study, options.lessonTitle),
     level: study.study_level,
     topic: sessionTopic(study),

@@ -456,7 +456,7 @@ export default function Home() {
     if (!result) {
       return "draft:empty";
     }
-    return `draft:${result.source_type}:${result.source_label}:${result.study_level}:${result.preview.slice(0, 80)}`;
+    return `draft:${result.source_type}:${result.source_label}:${result.study_level}:${(result.preview || "").slice(0, 80)}`;
   }, [activeLessonId, result]);
 
   useEffect(() => {
@@ -1796,9 +1796,9 @@ export default function Home() {
     () =>
       [
         { value: "overview" as const, label: "Overview", count: result ? 1 : 0 },
-        { value: "vocabulary" as const, label: "Vocabulary", count: result?.vocabulary_cards.length ?? 0 },
+        { value: "vocabulary" as const, label: "Vocabulary", count: result?.vocabulary_cards?.length ?? 0 },
         { value: "textbook" as const, label: "Textbook", count: result?.textbook_sections?.length ?? 0 },
-        { value: "units" as const, label: "Units", count: result?.units.length ?? 0 },
+        { value: "units" as const, label: "Units", count: result?.units?.length ?? 0 },
         { value: "note" as const, label: "Note", count: result?.note ? 1 : 0 }
       ],
     [result]
@@ -1811,7 +1811,7 @@ export default function Home() {
 
   useEffect(() => {
     setTextbookPage((current) => Math.min(current, pageCount(result?.textbook_sections?.length ?? 0, TEXTBOOK_PAGE_SIZE)));
-    setUnitPage((current) => Math.min(current, pageCount(result?.units.length ?? 0, UNIT_PAGE_SIZE)));
+    setUnitPage((current) => Math.min(current, pageCount(result?.units?.length ?? 0, UNIT_PAGE_SIZE)));
   }, [result]);
 
   const currentPracticeQuestion = practiceSession?.questions[practiceIndex] ?? null;
@@ -2055,8 +2055,8 @@ export default function Home() {
                 {result ? (
                   <div className="mini-summary">
                     <span className="pill">{result.study_level}</span>
-                    <strong>{result.vocabulary_cards.length} vocabulary cards ready</strong>
-                    <p>{result.preview.slice(0, 180)}</p>
+                    <strong>{(result.vocabulary_cards || []).length} vocabulary cards ready</strong>
+                    <p>{(result.preview || "").slice(0, 180)}</p>
                   </div>
                 ) : (
                   <p className="muted-copy">Analyze something first, then the app will unlock Results and Practice.</p>
@@ -2418,11 +2418,11 @@ export default function Home() {
                       </div>
                     ) : null}
 
-                    {result?.vocabulary_cards.length ? (
+                    {(result?.vocabulary_cards || []).length ? (
                       <div className="practice-start-card">
                         <div>
-                          <span className="pill">{result.study_level}</span>
-                          <h3>{result.vocabulary_cards.length} cards ready</h3>
+                          <span className="pill">{result?.study_level}</span>
+                          <h3>{(result?.vocabulary_cards || []).length} cards ready</h3>
                           <p>
                             {activeLessonId
                               ? "Progress for this saved lesson syncs to your account."
@@ -2955,7 +2955,7 @@ export default function Home() {
                 </div>
                 <div className="field" style={{ marginTop: 16 }}>
                   <label>Preview</label>
-                  <div className="preview">{result.preview}</div>
+                  <div className="preview">{result.preview || ""}</div>
                 </div>
                 {result.extraction_warning ? <div className="warning">{result.extraction_warning}</div> : null}
                         <div className="flow-actions">
@@ -2966,7 +2966,7 @@ export default function Home() {
                           <button className="ghost-button" type="button" onClick={() => setResultSection("vocabulary")}>
                             Vocabulary
                           </button>
-                          <button className="ghost-button" disabled={!result.vocabulary_cards.length} type="button" onClick={() => startPractice(practiceMode)}>
+                          <button className="ghost-button" disabled={!(result?.vocabulary_cards || []).length} type="button" onClick={() => startPractice(practiceMode)}>
                             Practice these
                           </button>
                           <button className="ghost-button" type="button" onClick={() => openAppScreen("audio")}>

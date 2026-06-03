@@ -223,10 +223,11 @@ export function readAloudSource(result: StudyResponse | null | undefined, inputT
     };
   }
 
-  const listenPractice = result.note.split(/listen practice/i)[1];
+  const noteText = result.note || "";
+  const listenPractice = noteText.split(/listen practice/i)[1];
   return {
     label: listenPractice ? "Practice" : "Note",
-    text: normalizeSpeechText((listenPractice || result.note).replace(/[#*_`>-]/g, " "))
+    text: normalizeSpeechText((listenPractice || noteText).replace(/[#*_`>-]/g, " "))
   };
 }
 

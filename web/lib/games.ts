@@ -63,6 +63,7 @@ type BuildOptions = {
   seed?: string;
   maxQuestions?: number;
   progress?: PracticeProgress | null;
+  lessonTitle?: string;
 };
 
 const activityTitles: Record<PracticeActivity, string> = {
@@ -324,7 +325,10 @@ function buildCardQuestion(
   return null;
 }
 
-function sessionTitle(study: StudyResponse): string {
+function sessionTitle(study: StudyResponse, lessonTitle?: string): string {
+  if (lessonTitle) {
+    return lessonTitle;
+  }
   const source = study.source_label && study.source_label !== "direct input" ? study.source_label : "Current words";
   return `${source} practice`;
 }
@@ -332,7 +336,13 @@ function sessionTitle(study: StudyResponse): string {
 function sessionTopic(study: StudyResponse): string {
   const sectionTopic = study.textbook_sections?.[0]?.topic || study.textbook_sections?.[0]?.title;
   if (sectionTopic) {
-    return clean(sectionTopic).slice(0, 120);
+    const cleaned = clean(sectionTopic);
+    // If topic is just a long list of words/vocabulary dump, return empty to fall back to the lesson title
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    if (words.length > 5 && !cleaned.includes(".") && !cleaned.includes(",") && !cleaned.includes("?") && !cleaned.includes(":") && !cleaned.includes(";")) {
+      return "";
+    }
+    return cleaned.slice(0, 120);
   }
   return "";
 }
@@ -410,7 +420,7 @@ export function buildPracticeSession(study: StudyResponse, options: BuildOptions
 
   return {
     id: `practice-${hashString(`${study.source_label}:${study.preview}:${mode}:${questions.length}`).toString(16)}`,
-    title: sessionTitle(study),
+    title: sessionTitle(study, options.lessonTitle),
     level: study.study_level,
     topic: sessionTopic(study),
     mode,

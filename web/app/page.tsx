@@ -1237,7 +1237,8 @@ export default function Home() {
     const session = buildPracticeSession(result, {
       mode: nextMode,
       seed: `${currentPracticeKey}:${practiceProgress.attempts}:${nextMode}`,
-      progress: practiceProgress
+      progress: practiceProgress,
+      lessonTitle: lessonTitle || undefined
     });
     if (!session.questions.length) {
       setPracticeError("This lesson needs at least two usable vocabulary cards for games.");

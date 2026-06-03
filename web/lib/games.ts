@@ -330,7 +330,11 @@ function sessionTitle(study: StudyResponse): string {
 }
 
 function sessionTopic(study: StudyResponse): string {
-  return clean(study.textbook_sections?.[0]?.topic || study.textbook_sections?.[0]?.title || study.preview).slice(0, 120);
+  const sectionTopic = study.textbook_sections?.[0]?.topic || study.textbook_sections?.[0]?.title;
+  if (sectionTopic) {
+    return clean(sectionTopic).slice(0, 120);
+  }
+  return "";
 }
 
 export function buildPracticeSession(study: StudyResponse, options: BuildOptions = {}): PracticeSession {

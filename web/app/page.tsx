@@ -2207,6 +2207,11 @@ export default function Home() {
                     value={lessonSearch}
                     onChange={(event) => setLessonSearch(event.target.value)}
                   />
+                  {lessonSearch ? (
+                    <button className="clear-search-button" type="button" aria-label="Clear search" onClick={() => setLessonSearch("")}>
+                      <XCircle size={16} />
+                    </button>
+                  ) : null}
                 </div>
                 {filteredLessons.length ? (
                   <div className="lesson-list">
@@ -2936,6 +2941,11 @@ export default function Home() {
                                 setVocabPage(1);
                               }}
                             />
+                            {search ? (
+                              <button className="clear-search-button" type="button" aria-label="Clear search" onClick={() => { setSearch(""); setVocabPage(1); }}>
+                                <XCircle size={16} />
+                              </button>
+                            ) : null}
                           </div>
                           <select
                             aria-label="Filter by type"

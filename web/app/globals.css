@@ -1590,15 +1590,12 @@ input[type="range"] {
   }
 
   .topbar {
-    position: sticky;
-    top: 0;
-    z-index: 30;
+    position: relative;
     width: 100%;
-    margin-bottom: 0;
-    padding: calc(8px + env(safe-area-inset-top)) 52px 8px 12px;
+    margin-bottom: 12px;
+    padding: calc(12px + env(safe-area-inset-top)) 52px 12px 12px;
     border-bottom: 1px solid rgba(30, 30, 36, 0.07);
-    background: rgba(253, 246, 227, 0.94);
-    backdrop-filter: blur(12px);
+    background: rgba(253, 246, 227, 0.85);
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -1764,13 +1761,10 @@ input[type="range"] {
   }
 
   .section-tabs {
-    position: sticky;
-    top: 54px;
-    z-index: 20;
-    padding: 6px 12px;
+    position: relative;
+    padding: 8px 12px;
     border-bottom: 1px solid rgba(30, 30, 36, 0.07);
-    background: rgba(253, 246, 227, 0.96);
-    backdrop-filter: blur(12px);
+    background: rgba(0, 109, 119, 0.04);
   }
 
   .section-tabs button {
@@ -1956,4 +1950,65 @@ input[type="range"] {
     gap: 8px;
     align-items: center;
   }
+}
+
+/* Tactile Feedback & Visual States */
+.practice-modes button,
+.choice-grid button,
+.match-board button,
+.builder-answer button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.practice-modes button:hover:not(:disabled),
+.choice-grid button:hover:not(:disabled),
+.match-board button:hover:not(:disabled),
+.builder-answer button:hover:not(:disabled) {
+  border-color: rgba(0, 109, 119, 0.25);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--accent-teal);
+  box-shadow: 0 4px 12px -8px rgba(0, 109, 119, 0.15);
+}
+
+.practice-modes button:active:not(:disabled),
+.choice-grid button:active:not(:disabled),
+.match-board button:active:not(:disabled),
+.builder-answer button:active:not(:disabled) {
+  transform: scale(0.98);
+  background: rgba(0, 109, 119, 0.05);
+  border-color: rgba(0, 109, 119, 0.35);
+}
+
+.lesson-card {
+  transition: all 0.2s ease;
+}
+
+.lesson-card:hover {
+  border-color: rgba(0, 109, 119, 0.2);
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 4px 12px -8px rgba(30, 30, 36, 0.1);
+}
+
+/* Matched Item Opacity Legibility Fix */
+.match-board button.matched:disabled {
+  opacity: 1;
+}
+
+/* Clear Search Button styling */
+.clear-search-button {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-light);
+  cursor: pointer;
+  transition: color 0.15s ease;
+  flex: 0 0 auto;
+  margin-left: 4px;
+}
+
+.clear-search-button:hover {
+  color: #b4232a;
 }

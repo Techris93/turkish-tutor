@@ -962,6 +962,16 @@ input:focus {
   gap: 14px;
 }
 
+.practice-game-top > div {
+  min-width: 0;
+}
+
+.practice-game-top p {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .practice-progressbar {
   height: 10px;
   overflow: hidden;

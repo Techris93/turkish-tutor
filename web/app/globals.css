@@ -1011,7 +1011,7 @@ input:focus {
 }
 
 .practice-question-head h3 {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   font-family: "Cormorant Garamond", Georgia, serif;
   font-size: 1.45rem;
   line-height: 1.15;
@@ -1034,7 +1034,7 @@ input:focus {
   gap: 10px;
   padding: 12px;
   text-align: left;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .choice-grid button span {
@@ -1073,7 +1073,7 @@ input:focus {
   min-height: 48px;
   padding: 10px 12px;
   text-align: left;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   white-space: normal;
   word-break: break-word;
 }
@@ -1336,7 +1336,7 @@ input[type="range"] {
   font-family: "Cormorant Garamond", Georgia, serif;
   font-size: 1.28rem;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .spoken-text-lang {
@@ -1438,7 +1438,7 @@ input[type="range"] {
 
 .textbook-section-head h3 {
   margin: 8px 0 4px;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .textbook-section-head p,
@@ -1468,7 +1468,7 @@ input[type="range"] {
 
 .textbook-section li {
   line-height: 1.42;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .vocab-card,
@@ -1524,7 +1524,7 @@ input[type="range"] {
   display: grid;
   gap: 4px;
   line-height: 1.4;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .card-foot {
@@ -1537,7 +1537,7 @@ input[type="range"] {
 
 .card-foot span {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .card-foot span:first-child {
@@ -1569,7 +1569,7 @@ input[type="range"] {
   margin: 0;
   white-space: pre-wrap;
   line-height: 1.58;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 @media (max-width: 960px) {

@@ -2853,7 +2853,11 @@ export default function Home() {
                     {currentSpokenText ? (
                       <>
                         <div className="spoken-text-meta">
-                          <span>{currentSpokenText.title}</span>
+                          <span title={currentSpokenText.title}>
+                            {currentSpokenText.title.length > 28
+                              ? currentSpokenText.title.slice(0, 28) + "..."
+                              : currentSpokenText.title}
+                          </span>
                           <strong>{currentSpokenText.progress}</strong>
                         </div>
                         {currentSpokenText.subtitle ? <p className="spoken-text-subtitle">{currentSpokenText.subtitle}</p> : null}

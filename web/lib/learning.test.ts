@@ -139,7 +139,7 @@ test("readAloudSource explains what the generic read-aloud button will play", ()
 test("spoken text display formats current read-aloud segment", () => {
   const item = examplePlaybackQueue([card], "English", "bilingual")[0];
   assert.deepEqual(spokenTextDisplay(item, item.segments[0], 2, 5, 0), {
-    title: "Buraya gel.",
+    title: "Example 3",
     subtitle: "Come here.",
     text: "Come here.",
     lang: "en-US",

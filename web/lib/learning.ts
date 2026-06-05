@@ -281,8 +281,16 @@ export function spokenTextDisplay(
   }
   const segmentTotal = Math.max(item.segments.length, 1);
   const segmentProgress = segmentTotal > 1 ? ` · segment ${Math.min(segmentIndex + 1, segmentTotal)} of ${segmentTotal}` : "";
+
+  let title = item.title || "Read Aloud";
+  if (item.id.startsWith("example-")) {
+    title = `Example ${itemIndex + 1}`;
+  } else if (item.id.startsWith("word-")) {
+    title = `Word ${itemIndex + 1}`;
+  }
+
   return {
-    title: item.title || "Read Aloud",
+    title,
     subtitle: item.subtitle,
     text: normalizeSpeechText(segment.text),
     lang: segment.lang,

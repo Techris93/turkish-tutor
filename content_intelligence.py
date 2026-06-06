@@ -21,7 +21,18 @@ TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".tsv", ".json", ".srt"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 PDF_EXTENSIONS = {".pdf"}
 DOC_EXTENSIONS = {".docx"}
-SUPPORTED_FILE_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | PDF_EXTENSIONS | DOC_EXTENSIONS
+EXCEL_EXTENSIONS = {".xlsx", ".xls"}
+PPT_EXTENSIONS = {".pptx"}
+HTML_EXTENSIONS = {".html", ".htm"}
+SUPPORTED_FILE_EXTENSIONS = (
+    TEXT_EXTENSIONS
+    | IMAGE_EXTENSIONS
+    | PDF_EXTENSIONS
+    | DOC_EXTENSIONS
+    | EXCEL_EXTENSIONS
+    | PPT_EXTENSIONS
+    | HTML_EXTENSIONS
+)
 TURKISH_CHARACTERS = set("çğıöşüÇĞİÖŞÜ")
 COMMON_TURKISH_WORDS = {
     "ben", "sen", "o", "biz", "siz", "onlar", "ve", "bir", "bu", "şu",
@@ -418,24 +429,26 @@ def _read_scanned_pdf(path: Path) -> tuple[str, str]:
     return "\n\n".join(pages), warning
 
 
-def _read_pdf(path: Path) -> tuple[str, str]:
+def _read_with_markitdown(path: Path) -> str:
     try:
-        try:
-            from pypdf import PdfReader  # type: ignore
-        except ImportError:
-            from PyPDF2 import PdfReader  # type: ignore
+        from markitdown import MarkItDown
+        md = MarkItDown()
+        result = md.convert(str(path))
+        return result.text_content or ""
     except ImportError as exc:
         raise ExtractionError(
-            "PDF extraction requires pypdf. Install with: pip install pypdf"
+            "MarkItDown extraction requires markitdown. Install with: pip install markitdown"
         ) from exc
+    except Exception as exc:
+        raise ExtractionError(f"MarkItDown conversion failed: {exc}") from exc
 
-    reader = PdfReader(str(path))
-    pages = []
-    for index, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        if text.strip():
-            pages.append(f"[Page {index}]\n{text}")
-    text = "\n\n".join(pages)
+
+def _read_pdf(path: Path) -> tuple[str, str]:
+    try:
+        text = _read_with_markitdown(path)
+    except Exception:
+        text = ""
+
     if len(text.strip()) >= 200:
         return text, ""
 
@@ -446,15 +459,19 @@ def _read_pdf(path: Path) -> tuple[str, str]:
 
 
 def _read_docx(path: Path) -> str:
-    try:
-        import docx  # type: ignore
-    except ImportError as exc:
-        raise ExtractionError(
-            "DOCX extraction requires python-docx. Install with: pip install python-docx"
-        ) from exc
+    return _read_with_markitdown(path)
 
-    document = docx.Document(str(path))
-    return "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+def _read_excel(path: Path) -> str:
+    return _read_with_markitdown(path)
+
+
+def _read_ppt(path: Path) -> str:
+    return _read_with_markitdown(path)
+
+
+def _read_html(path: Path) -> str:
+    return _read_with_markitdown(path)
 
 
 def _read_image(path: Path) -> str:
@@ -490,11 +507,17 @@ def extract_text_from_file_details(path: str | os.PathLike[str]) -> tuple[str, s
         return text, "pdf", warning
     if suffix in DOC_EXTENSIONS:
         return _read_docx(file_path), "document", ""
+    if suffix in EXCEL_EXTENSIONS:
+        return _read_excel(file_path), "document", ""
+    if suffix in PPT_EXTENSIONS:
+        return _read_ppt(file_path), "document", ""
+    if suffix in HTML_EXTENSIONS:
+        return _read_html(file_path), "document", ""
     if suffix in IMAGE_EXTENSIONS:
         return _read_image(file_path), "image", ""
 
     raise ExtractionError(
-        f"Unsupported input file type '{suffix}'. Supported: text, PDF, DOCX, images."
+        f"Unsupported input file type '{suffix}'. Supported: text, PDF, DOCX, Excel, PowerPoint, HTML, images."
     )
 
 

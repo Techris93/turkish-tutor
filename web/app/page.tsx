@@ -1989,7 +1989,7 @@ export default function Home() {
               <input
                 id="file-input"
                 type="file"
-                accept=".txt,.md,.csv,.tsv,.json,.srt,.pdf,.docx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff"
+                accept=".txt,.md,.csv,.tsv,.json,.srt,.pdf,.docx,.xlsx,.xls,.pptx,.html,.htm,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff"
                 onChange={handleFile}
               />
             </div>

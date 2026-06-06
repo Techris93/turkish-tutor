@@ -719,6 +719,61 @@ async def extract_upload(upload: UploadFile, current_level: str) -> ExtractedCon
                 pass
 
 
+async def extract_uploads(uploads: List[UploadFile], current_level: str) -> ExtractedContent:
+    if not uploads:
+        raise ExtractionError("No files uploaded.")
+
+    extracted_list = []
+    for upload in uploads:
+        if upload.filename:
+            ext = await extract_upload(upload, current_level)
+            extracted_list.append(ext)
+
+    if not extracted_list:
+        raise ExtractionError("No non-empty files uploaded.")
+
+    if len(extracted_list) == 1:
+        return extracted_list[0]
+
+    unique_types = {ext.source_type for ext in extracted_list}
+    if len(unique_types) == 1:
+        source_type = list(unique_types)[0]
+    else:
+        source_type = "mixed"
+
+    source_label = ", ".join(ext.source_label for ext in extracted_list)
+
+    text_parts = []
+    for ext in extracted_list:
+        text_parts.append(f"--- File: {ext.source_label} ---\n{ext.text}")
+    text = "\n\n".join(text_parts)
+
+    units = []
+    for ext in extracted_list:
+        units.extend(ext.units)
+    units = units[:48]
+
+    inferred_level = infer_cefr_level(text, fallback=current_level)
+
+    textbook_sections = []
+    for ext in extracted_list:
+        textbook_sections.extend(ext.textbook_sections)
+    textbook_sections = textbook_sections[:15]
+
+    warnings = [ext.extraction_warning for ext in extracted_list if ext.extraction_warning]
+    extraction_warning = "; ".join(warnings) if warnings else ""
+
+    return ExtractedContent(
+        source_type=source_type,
+        source_label=source_label,
+        text=text,
+        units=units,
+        inferred_level=inferred_level,
+        textbook_sections=textbook_sections,
+        extraction_warning=extraction_warning,
+    )
+
+
 app = FastAPI(
     title="Turkce Hoca API",
     version="1.0.0",
@@ -1242,6 +1297,7 @@ async def study(
     level: str = Form("A1"),
     target_language: str = Form("English"),
     file: Optional[UploadFile] = File(None),
+    files: List[UploadFile] = File([]),
 ) -> StudyResponse:
     rate_limit(request, "study", RateLimitRule(30, 3600))
     requested_level = normalize_level(level)
@@ -1249,8 +1305,16 @@ async def study(
     if len(text) > max_text_input_chars():
         raise HTTPException(status_code=413, detail=f"Text input is too large. Limit is {max_text_input_chars()} characters.")
     try:
+        all_uploads = []
         if file and file.filename:
-            extracted = await extract_upload(file, requested_level)
+            all_uploads.append(file)
+        if files:
+            for f in files:
+                if f.filename:
+                    all_uploads.append(f)
+
+        if all_uploads:
+            extracted = await extract_uploads(all_uploads, requested_level)
         else:
             extracted = extract_content(text, current_level=requested_level)
     except ExtractionError as exc:

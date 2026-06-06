@@ -356,7 +356,7 @@ function oauthProviderIcon(provider: string) {
 
 export default function Home() {
   const [text, setText] = useState("Merhaba, bugün Türkçe öğreniyorum.");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [level, setLevel] = useState("A1");
   const [targetLanguage, setTargetLanguage] = useState("English");
   const [result, setResult] = useState<StudyResponse | null>(null);
@@ -837,8 +837,10 @@ export default function Home() {
     body.append("text", text);
     body.append("level", level);
     body.append("target_language", targetLanguage);
-    if (file) {
-      body.append("file", file);
+    if (files.length > 0) {
+      files.forEach((f) => {
+        body.append("files", f);
+      });
     }
 
     try {
@@ -865,6 +867,11 @@ export default function Home() {
       setUnitPage(1);
       setAppScreen("results");
       resetPracticeSession();
+      setFiles([]);
+      const fileInput = document.getElementById("file-input") as HTMLInputElement | null;
+      if (fileInput) {
+        fileInput.value = "";
+      }
     } catch (caught) {
       setError(studyErrorMessage(caught));
     } finally {
@@ -873,7 +880,7 @@ export default function Home() {
   }
 
   function handleFile(event: ChangeEvent<HTMLInputElement>) {
-    setFile(event.target.files?.[0] ?? null);
+    setFiles(Array.from(event.target.files || []));
   }
 
   function defaultLessonTitle(study: StudyResponse) {
@@ -1985,13 +1992,24 @@ export default function Home() {
             </div>
 
             <div className="field">
-              <label htmlFor="file-input">File</label>
+              <label htmlFor="file-input">Files / Images</label>
               <input
                 id="file-input"
                 type="file"
+                multiple
                 accept=".txt,.md,.csv,.tsv,.json,.srt,.pdf,.docx,.xlsx,.xls,.pptx,.html,.htm,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff"
                 onChange={handleFile}
               />
+              {files.length > 0 && (
+                <div className="selected-files-list">
+                  {files.map((f, idx) => (
+                    <div key={idx} className="selected-file-badge">
+                      <span className="file-name">{f.name}</span>
+                      <span className="file-size">({(f.size / 1024).toFixed(1)} KB)</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="field">

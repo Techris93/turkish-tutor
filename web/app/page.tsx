@@ -880,7 +880,19 @@ export default function Home() {
   }
 
   function handleFile(event: ChangeEvent<HTMLInputElement>) {
-    setFiles(Array.from(event.target.files || []));
+    const newFiles = Array.from(event.target.files || []);
+    setFiles((prev) => {
+      const existingKeys = new Set(prev.map((f) => `${f.name}-${f.size}-${f.lastModified}`));
+      const uniqueNew = newFiles.filter((f) => !existingKeys.has(`${f.name}-${f.size}-${f.lastModified}`));
+      return [...prev, ...uniqueNew];
+    });
+    if (event.target) {
+      event.target.value = "";
+    }
+  }
+
+  function removeFile(index: number) {
+    setFiles((prev) => prev.filter((_, idx) => idx !== index));
   }
 
   function defaultLessonTitle(study: StudyResponse) {
@@ -2004,8 +2016,18 @@ export default function Home() {
                 <div className="selected-files-list">
                   {files.map((f, idx) => (
                     <div key={idx} className="selected-file-badge">
-                      <span className="file-name">{f.name}</span>
-                      <span className="file-size">({(f.size / 1024).toFixed(1)} KB)</span>
+                      <div className="file-info">
+                        <span className="file-name">{f.name}</span>
+                        <span className="file-size">({(f.size / 1024).toFixed(1)} KB)</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="remove-file-button"
+                        onClick={() => removeFile(idx)}
+                        title="Remove file"
+                      >
+                        &times;
+                      </button>
                     </div>
                   ))}
                 </div>
